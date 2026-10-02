@@ -1,0 +1,8 @@
+* text=auto
+*.pdf binary
+*.bcmap binary
+*.pfb binary
+*.ttf binary
+*.png binary
+# Preserve vendored upstream bytes and license formatting.
+www/vendor/** -text

@@ -1,0 +1,22 @@
+import {readFile,writeFile,stat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import path from 'node:path';
+
+const apk=process.argv[2];
+if(!apk)throw Error('Usage: node scripts/create-update-manifest.mjs dist/qingke-X.Y.Z-release.apk [release-notes.txt]');
+const gradle=await readFile('android/app/build.gradle','utf8');
+const versionName=gradle.match(/versionName\s+['"](\d+\.\d+\.\d+)['"]/)?.[1];
+const versionCode=Number(gradle.match(/versionCode\s+(\d+)/)?.[1]);
+if(!versionName||!Number.isSafeInteger(versionCode)||versionCode<1)throw Error('Cannot read release version');
+const asset=`qingke-${versionName}-release.apk`;
+if(path.basename(apk)!==asset)throw Error('APK filename must match the configured release version');
+const size=(await stat(apk)).size;
+if(size<1024||size>100*1024*1024)throw Error('APK size is outside the supported update limits');
+const bytes=await readFile(apk),sha256=createHash('sha256').update(bytes).digest('hex');
+const notes=process.argv[3]?(await readFile(process.argv[3],'utf8')).trim():`清课 ${versionName}`;
+if(notes.length>4000)throw Error('Release notes exceed 4000 characters');
+const manifest={format:'qingke-update',version:1,packageName:'cn.qingke.app',versionCode,versionName,tag:`v${versionName}`,asset,size,sha256,notes};
+const output=path.join(path.dirname(apk),'update.json');
+await writeFile(output,JSON.stringify(manifest,null,2)+'\n','utf8');
+await writeFile(path.join(path.dirname(apk),'SHA256SUMS'),`${sha256}  ${asset}\n`,'utf8');
+console.log(`Wrote ${output}; code ${versionCode}, ${size} bytes. Verify APK signature before publishing.`);

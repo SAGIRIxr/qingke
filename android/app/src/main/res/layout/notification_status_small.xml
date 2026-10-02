@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical">
+    <TextView android:id="@+id/status_title"
+        android:layout_width="match_parent" android:layout_height="21dp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+        android:textSize="14sp" android:singleLine="true" android:ellipsize="end"
+        android:includeFontPadding="false" android:gravity="center_vertical" />
+    <Chronometer android:id="@+id/status_clock"
+        android:layout_width="match_parent" android:layout_height="23dp"
+        android:textAppearance="@android:style/TextAppearance.Material.Notification.Line2"
+        android:textSize="15sp" android:textStyle="bold" android:singleLine="true"
+        android:includeFontPadding="false" android:gravity="center_vertical" />
+</LinearLayout>

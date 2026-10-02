@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+def signingFile = System.getenv('QINGKE_STORE_FILE')
+def signingPassword = System.getenv('QINGKE_STORE_PASSWORD')
+def signingAlias = System.getenv('QINGKE_KEY_ALIAS')
+def signingKeyPassword = System.getenv('QINGKE_KEY_PASSWORD')
+def hasPrivateSigning = signingFile && signingPassword && signingAlias && signingKeyPassword
+
+android {
+    namespace 'cn.qingke.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'cn.qingke.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 4
+        versionName '3.1.0'
+    }
+
+    signingConfigs {
+        if (hasPrivateSigning) {
+            qingke {
+                storeFile file(signingFile)
+                storePassword signingPassword
+                keyAlias signingAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            debuggable true
+            if (hasPrivateSigning) signingConfig signingConfigs.qingke
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+            if (hasPrivateSigning) signingConfig signingConfigs.qingke
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures { buildConfig true }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name == 'assembleRelease' || it.name == 'bundleRelease' || it.name == 'packageRelease' } && !hasPrivateSigning) {
+        throw new GradleException('Release signing is missing. Set the four QINGKE signing environment variables; never commit signing keys.')
+    }
+}
+
+tasks.register('syncWebAssets', Sync) {
+    from rootProject.file('www')
+    into layout.projectDirectory.dir('src/main/assets/www')
+    exclude '**/*.test.*', '**/node_modules/**', '**/.DS_Store'
+}
+tasks.named('preBuild').configure { dependsOn 'syncWebAssets' }
+

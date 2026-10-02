@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>Offline PDF import fixture QA</title>
+<pre id="result">Running…</pre><canvas id="preview"></canvas>
+<script type="module">
+import {parsePdf} from '../www/pdf-import.js';
+const results=[];
+for(const name of ['synthetic-chinese-timetable.pdf','synthetic-scan.pdf']){
+ const bytes=await (await fetch('./fixtures/pdf/'+name)).arrayBuffer();
+ const result=await parsePdf(bytes,{name,totalWeeks:20});
+ results.push({name,...result});
+}
+const expected=results[0].courses;
+const ok=expected.length===3&&expected[0].name==='高等数学'&&expected[0].weeks.length===8&&expected[0].location==='A201'&&expected[1].day===3&&expected[2].day===5&&results[1].warnings.some(w=>w.includes('OCR'));
+window.pdfTestResults={ok,results};document.querySelector('#result').textContent=JSON.stringify(window.pdfTestResults,null,2);document.title=ok?'PASS PDF fixtures':'FAIL PDF fixtures';
+</script>

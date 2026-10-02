@@ -1,0 +1,41 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>离线导入浏览器验证</title></head><body><pre id="result">RUNNING</pre>
+<script type="module">
+import { parseSchedule } from '../../www/importer.js';
+const results = [];
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+try {
+  const zfHtml = await (await fetch('./zhengfang.html')).text();
+  const zf = parseSchedule({ html: zfHtml, url: 'https://jwgl.example.edu.cn/jwglxt/kbcx/student' });
+  assert(zf.courses.length === 2, `正方课表应有2门：${JSON.stringify(zf)}`);
+  assert(zf.courses[0].endPeriod === 2 && zf.courses[0].teacher === '王老师', '正方节次、教师解析失败');
+  assert(zf.courses[1].teacher === '李老师' && zf.courses[1].location === 'B302', '正方title字段解析失败');
+  assert(JSON.stringify(zf.courses[1].weeks) === '[2,4,6,8,10,12,14,16]', '正方双周解析失败');
+  assert(zf.warnings.some(warning => warning.includes('待完善课程') && warning.includes('节次')), '缺少节次的课块应跳过');
+  results.push({ fixture: 'zhengfang', passed: true, courses: zf.courses.length, warnings: zf.warnings });
+  const genericHtml = await (await fetch('./generic-table.html')).text();
+  const generic = parseSchedule({ html: genericHtml });
+  assert(generic.courses.length === 2, `通用课表应有2门：${JSON.stringify(generic)}`);
+  assert(generic.courses[0].day === 1 && generic.courses[0].startPeriod === 1 && generic.courses[0].endPeriod === 2, 'rowspan节次解析失败');
+  assert(generic.courses[1].day === 2 && generic.courses[1].startPeriod === 3 && generic.courses[1].endPeriod === 4, '跨节次行标签解析失败');
+  results.push({ fixture: 'generic-table', passed: true, courses: generic.courses.length });
+  const tooltipHtml = await (await fetch('./zhengfang-tooltip.html')).text();
+  const tooltip = parseSchedule({ html: tooltipHtml });
+  assert(tooltip.courses.length === 2, `tooltip课表应有2门：${JSON.stringify(tooltip)}`);
+  assert(tooltip.courses[0].teacher === '刘老师' && tooltip.courses[0].location === '综合楼403', 'data-original-title相邻文本解析失败');
+  assert(tooltip.courses[1].teacher === '赵老师' && tooltip.courses[1].location === '实验楼202', 'title相邻文本解析失败');
+  assert(tooltip.courses[1].day === 3 && tooltip.courses[1].startPeriod === 5 && tooltip.courses[1].endPeriod === 6, '1-1单元格坐标解析失败');
+  assert(tooltip.courses[1].weeks.length === 8 && tooltip.courses[1].weeks[0] === 2, '节/周混合字段解析失败');
+  results.push({ fixture: 'zhengfang-tooltip', passed: true, courses: tooltip.courses.length });
+  const heading = '<tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th><th>星期四</th><th>星期五</th><th>星期六</th><th>星期日</th></tr>';
+  const genericZfHtml = tooltipHtml.replace('<table><tr>', `<table>${heading}<tr><td>1-2节</td>`).replaceAll(/ id="[13]-[15]"/g, '');
+  const genericZf = parseSchedule({ html: genericZfHtml });
+  assert(genericZf.courses.length === 2, `通用表格正方课块应有2门：${JSON.stringify(genericZf)}`);
+  assert(genericZf.courses[0].teacher === '刘老师' && genericZf.courses[0].location === '综合楼403', '通用表格课块字段解析失败');
+  results.push({ fixture: 'generic-zhengfang-block', passed: true, courses: genericZf.courses.length });
+  document.body.dataset.result = 'PASS';
+  document.querySelector('#result').textContent = JSON.stringify(results);
+} catch (error) {
+  document.body.dataset.result = 'FAIL';
+  document.querySelector('#result').textContent = error.stack;
+}
+</script></body></html>

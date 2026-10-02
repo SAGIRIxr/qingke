@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Symmetric bounds 28..80; the glyph stays inside the 66 dp safe circle. -->
+    <group android:translateX="4" android:translateY="4">
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF" android:strokeWidth="4" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M35,26H65Q74,26 74,35V65Q74,74 65,74H35Q26,74 26,65V35Q26,26 35,26Z M38,31V35M62,31V35M26,42H74" />
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M60,59A10,10 0,1 1,40 59A10,10 0,1 1,60 59Z M50,53V59L55,62" />
+    </group>
+</vector>
