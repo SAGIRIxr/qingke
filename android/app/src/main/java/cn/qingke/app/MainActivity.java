@@ -4,7 +4,10 @@ import android.annotation.SuppressLint;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -86,9 +89,23 @@ public final class MainActivity extends Activity {
     private String mobileUserAgent;
     private ShareClient shareClient;
     private UpdateClient updateClient;
+    private final ShareEntryInbox shareEntries = new ShareEntryInbox();
+    private SharedPreferences shareEntryPreferences;
+    private volatile boolean entryPageReady, entryForeground, entryHasFocus, entrySchoolOpen, entryDestroyed;
+    private boolean clipboardCheckedForFocus, skipClipboardUntilPause;
+    private String handledShareIntentId = "";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        shareEntryPreferences = getSharedPreferences("share-entry", MODE_PRIVATE);
+        shareEntries.restoreRecent(shareEntryPreferences.getString("recentHashes", ""));
+        if (savedInstanceState != null) {
+            handledShareIntentId = savedInstanceState.getString("handledShareIntent", "");
+            skipClipboardUntilPause = savedInstanceState.getBoolean("skipShareClipboard", false);
+            shareEntries.restorePending(savedInstanceState.getStringArray("pendingShareUrls"),
+                    savedInstanceState.getStringArray("pendingShareSources"), clipboardShareEnabled());
+        }
+        acceptShareIntent(getIntent(), true);
         shareClient = new ShareClient(result -> dispatch("onShareResult", result.toString()));
         updateClient = new UpdateClient(this, new UpdateClient.Listener() {
             @Override public void onEvent(JSONObject event) { dispatch("onAppUpdateEvent", event.toString()); }
@@ -167,6 +184,12 @@ public final class MainActivity extends Activity {
             }
 
             @Override public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) { handler.cancel(); }
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) { entryPageReady = false; }
+            @Override public void onPageFinished(WebView view, String url) {
+                entryPageReady = APP_URL.equals(url);
+                notifyShareEntry();
+                readShareClipboardOnFocus();
+            }
         });
         appWeb.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onConsoleMessage(ConsoleMessage message) {
@@ -223,6 +246,47 @@ public final class MainActivity extends Activity {
 
     public final class NativeBridge {
         @JavascriptInterface public String getVersion() { return BuildConfig.VERSION_NAME; }
+        @JavascriptInterface public String consumeShareLink() {
+            if (!entryPageReady || !entryForeground || !entryHasFocus || entrySchoolOpen || entryDestroyed) return "";
+            ShareEntryInbox.Entry entry = shareEntries.poll();
+            while (entry != null && "clipboard".equals(entry.source) && !clipboardShareEnabled()) entry = shareEntries.poll();
+            if (entry == null) return "";
+            try { return new JSONObject().put("code", entry.link.code).put("server", entry.link.server)
+                    .put("source", entry.source).put("id", entry.link.id).toString(); }
+            catch (JSONException impossible) { return ""; }
+        }
+        @JavascriptInterface public String getShareEntrySettings() {
+            return "{\"clipboardEnabled\":" + clipboardShareEnabled() + "}";
+        }
+        @JavascriptInterface public void setClipboardShareEnabled(boolean enabled) {
+            shareEntryPreferences.edit().putBoolean("clipboardEnabled", enabled).apply();
+            if (!enabled) shareEntries.dropClipboard();
+        }
+        @JavascriptInterface public boolean shareText(String text) {
+            if (!ShareEntryPolicy.validText(text)) return false;
+            runOnUiThread(() -> {
+                if (entryDestroyed || isFinishing()) return;
+                try {
+                    rememberOwnShareText(text);
+                    Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+                    startActivity(Intent.createChooser(send, "分享课表"));
+                } catch (ActivityNotFoundException | SecurityException error) { toast("无法打开系统分享，请尝试复制链接"); }
+            });
+            return true;
+        }
+        @JavascriptInterface public boolean copyText(String text) {
+            if (!ShareEntryPolicy.validText(text)) return false;
+            runOnUiThread(() -> {
+                if (entryDestroyed || isFinishing()) return;
+                try {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard == null) { toast("无法使用系统剪贴板"); return; }
+                    clipboard.setPrimaryClip(ClipData.newPlainText("清课分享", text));
+                    rememberOwnShareText(text);
+                } catch (SecurityException error) { toast("系统暂不允许复制，请稍后重试"); }
+            });
+            return true;
+        }
         @JavascriptInterface public String getUpdateStatus() { UpdateClient client=updateClient;return client==null?"{}":client.status().toString(); }
         @JavascriptInterface public void checkForUpdate(String requestId,String proxyBase) { UpdateClient client=updateClient;if(client!=null)client.check(requestId,proxyBase); }
         @JavascriptInterface public void downloadUpdate(String requestId) { UpdateClient client=updateClient;if(client!=null)client.download(requestId); }
@@ -258,6 +322,71 @@ public final class MainActivity extends Activity {
             else ScheduleNotifications.test(MainActivity.this);
             dispatchNotificationStatus();
         }); }
+    }
+
+    private boolean clipboardShareEnabled() { return shareEntryPreferences.getBoolean("clipboardEnabled", true); }
+
+    private void persistShareEntryHashes() {
+        shareEntryPreferences.edit().putString("recentHashes", shareEntries.recentState()).apply();
+    }
+
+    private void rememberOwnShareText(String text) {
+        // Copying our own share must not suggest importing it when the chooser closes.
+        shareEntries.remember(ShareEntryPolicy.fromClipboard(text));
+        persistShareEntryHashes();
+    }
+
+    private void acceptShareIntent(Intent intent, boolean restoring) {
+        // Do not access extras, selectors, clip data, flags, or any externally supplied operation.
+        ShareEntryPolicy.Link link = intent == null ? null : ShareEntryPolicy.fromIntent(intent.getAction(), intent.getDataString());
+        if (link != null && !(restoring && link.id.equals(handledShareIntentId))) {
+            handledShareIntentId = link.id;
+            skipClipboardUntilPause = true;
+            if (shareEntries.offer(link, "link")) persistShareEntryHashes();
+            notifyShareEntry();
+        }
+        // A recreation must not replay the original external URL after the user has consumed it.
+        setIntent(new Intent(this, MainActivity.class).setAction(Intent.ACTION_MAIN));
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        acceptShareIntent(intent, false);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        ShareEntryInbox.Entry[] entries = shareEntries.snapshot();
+        String[] urls = new String[entries.length], sources = new String[entries.length];
+        for (int i = 0; i < entries.length; i++) { urls[i] = entries[i].link.url(); sources[i] = entries[i].source; }
+        state.putStringArray("pendingShareUrls", urls);
+        state.putStringArray("pendingShareSources", sources);
+        state.putString("handledShareIntent", handledShareIntentId);
+        state.putBoolean("skipShareClipboard", skipClipboardUntilPause);
+        super.onSaveInstanceState(state);
+    }
+
+    private void notifyShareEntry() {
+        if (!entryPageReady || !entryForeground || !entryHasFocus || entrySchoolOpen || entryDestroyed || !shareEntries.hasPending()) return;
+        // The payload stays native until the local UI is ready to open (or queue) its confirmation form.
+        dispatch("onShareLinkAvailable", "");
+    }
+
+    private void readShareClipboardOnFocus() {
+        if (!entryPageReady || !entryForeground || !entryHasFocus || entrySchoolOpen || entryDestroyed || clipboardCheckedForFocus) return;
+        clipboardCheckedForFocus = true;
+        if (!clipboardShareEnabled() || skipClipboardUntilPause || shareEntries.hasExplicit()) return;
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() != 1) return;
+            // getText only: never coerceToText, open a clipboard content URI, or expose arbitrary text to JS.
+            CharSequence text = clip.getItemAt(0).getText();
+            ShareEntryPolicy.Link link = ShareEntryPolicy.fromClipboard(text);
+            if (link != null && shareEntries.offer(link, "clipboard")) {
+                persistShareEntryHashes();
+                notifyShareEntry();
+            }
+        } catch (SecurityException | IllegalStateException ignored) { /* OS clipboard policy remains authoritative. */ }
     }
 
     private void requestNotificationPermission() {
@@ -298,6 +427,7 @@ public final class MainActivity extends Activity {
         String url = validSchoolUrl(rawUrl);
         if (url == null) { toast("请输入有效的 http 或 https 教务网址"); return; }
         closeSchool();
+        entrySchoolOpen = true;
         schoolPanel = new LinearLayout(this);
         schoolPanel.setOrientation(LinearLayout.VERTICAL);
         schoolPanel.setBackgroundColor(BG);
@@ -485,6 +615,8 @@ public final class MainActivity extends Activity {
         progress = null;
         captureButton = null;
         if (appWeb != null) { appWeb.setVisibility(View.VISIBLE); appWeb.requestFocus(); }
+        entrySchoolOpen = false;
+        notifyShareEntry();
     }
 
     private void chooseBackupDestination(String json) {
@@ -634,6 +766,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        entryForeground = false;
+        skipClipboardUntilPause = false;
         super.onPause();
         if (appWeb != null) appWeb.onPause();
         if (schoolWeb != null) schoolWeb.onPause();
@@ -642,6 +776,9 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        entryForeground = true;
+        notifyShareEntry(); // onNewIntent can pause/resume without changing window focus.
+        readShareClipboardOnFocus(); // Finish a focus acquisition if its callback arrived before onResume.
         if (appWeb != null) appWeb.onResume();
         if (schoolWeb != null) schoolWeb.onResume();
         ScheduleNotifications.refresh(this, false);
@@ -651,6 +788,9 @@ public final class MainActivity extends Activity {
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) clipboardCheckedForFocus = false;
+        entryHasFocus = hasFocus;
+        if (hasFocus) { notifyShareEntry(); readShareClipboardOnFocus(); }
         // Some vendor permission panels are overlays and do not pause/resume the Activity.
         if (hasFocus && appWeb != null) {
             dispatchNotificationStatus();
@@ -659,6 +799,7 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        entryDestroyed = true;
         if (updateClient != null) { updateClient.close(); updateClient = null; }
         if (shareClient != null) { shareClient.close(); shareClient = null; }
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }

@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "cn.qingke.app",
+      "sha256_cert_fingerprints": ["3A:7B:3D:E6:2C:96:FB:B3:DD:5F:5E:B2:6C:02:BF:E8:8E:FA:1D:E8:8B:09:17:5C:F8:3A:58:FB:3A:26:41:B9"]
+    }
+  }
+]

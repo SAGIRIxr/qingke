@@ -24,6 +24,19 @@ from share_schema import InvalidPayload, normalize_payload
 LOG = logging.getLogger('qingke-share')
 ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 MAX_BODY = 1024 * 1024
+SITE_ROOT = Path(__file__).resolve().with_name('site')
+# Exact route-to-file mapping; request paths are never used as filesystem paths.
+SITE_FILES = {
+    '/': ('index.html', 'text/html; charset=utf-8'),
+    '/s': ('share.html', 'text/html; charset=utf-8'),
+    '/site.css': ('site.css', 'text/css; charset=utf-8'),
+    '/site.js': ('site.js', 'text/javascript; charset=utf-8'),
+    '/site-config.js': ('site-config.js', 'text/javascript; charset=utf-8'),
+    '/share-link.js': ('share-link.js', 'text/javascript; charset=utf-8'),
+    '/icon.svg': ('icon.svg', 'image/svg+xml'),
+    '/.well-known/assetlinks.json': ('assetlinks.json', 'application/json; charset=utf-8'),
+}
+SITE_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
 
 
 @dataclass
@@ -238,6 +251,10 @@ class ShareApp:
             raise ApiError(400, 'invalid_request', '请求来源格式无效') from None
 
     def __call__(self, env, start_response):
+        # Public pages contain no share data and do not consume API rate limits.
+        # This also keeps navigation independent of API CORS restrictions.
+        if env.get('PATH_INFO', '') in SITE_FILES:
+            return self.serve_site(env, start_response)
         request_id = secrets.token_hex(6)
         origin = env.get('HTTP_ORIGIN')
         cors = origin if origin in self.config.allowed_origins else None
@@ -302,6 +319,30 @@ class ShareApp:
             # Never log payloads, credentials, URLs, or exception text containing them.
             LOG.error('internal_error request_id=%s', request_id)
             return self.error(start_response, ApiError(500, 'internal_error', '服务暂时出现问题'), cors, request_id)
+
+    @staticmethod
+    def serve_site(env, start):
+        path, method = env.get('PATH_INFO', ''), env.get('REQUEST_METHOD', '')
+        filename, content_type = SITE_FILES[path]
+        status, extra = 200, []
+        if method not in ('GET', 'HEAD'):
+            status, raw, content_type = 405, b'Method not allowed', 'text/plain; charset=utf-8'
+            extra = [('Allow', 'GET, HEAD')]
+        elif env.get('QUERY_STRING', '') not in (('', 'fallback=1') if path == '/s' else ('',)):
+            status, raw, content_type = 400, b'Unexpected query parameters', 'text/plain; charset=utf-8'
+        else:
+            try:
+                raw = (SITE_ROOT / filename).read_bytes()
+            except OSError:
+                # Do not expose local paths or exception text if deployment is incomplete.
+                status, raw, content_type = 503, b'Page temporarily unavailable', 'text/plain; charset=utf-8'
+        headers = [('Content-Type', content_type), ('Content-Length', str(len(raw))),
+                   ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'),
+                   ('Referrer-Policy', 'no-referrer'), ('Content-Security-Policy', SITE_CSP),
+                   ('X-Frame-Options', 'DENY'), ('Cross-Origin-Resource-Policy', 'same-origin'),
+                   ('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')]
+        start(f'{status} {HTTPStatus(status).phrase}', headers + extra)
+        return [b'' if method == 'HEAD' else raw]
 
     @staticmethod
     def read_json(env):

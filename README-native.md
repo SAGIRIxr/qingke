@@ -34,6 +34,10 @@
 | `Android.openNotificationSettings()` | 打开应用通知设置，包括课前提醒和状态两个频道 |
 | `Android.testNotification()` | 立即发送一条 60 秒后自动消失的测试通知；不会自行请求权限 |
 | `Android.shareRequest(requestId, action, baseUrl, payloadJson)` | 仅允许 `create/get/update/delete` 分享操作，后台 HTTPS 请求用户配置的服务器；本地页面网络 CSP 不放宽 |
+| `Android.consumeShareLink()` | 取出一条待确认分享，返回 JSON 字符串 `{code,server,source,id}`；无记录返回空字符串。`source` 为 `link` 或 `clipboard`，`id` 为规范化分享内容的 SHA-256 |
+| `Android.getShareEntrySettings()` | 返回 JSON 字符串 `{clipboardEnabled}`，剪贴板分享识别默认开启 |
+| `Android.setClipboardShareEnabled(enabled)` | 保存开关；关闭时丢弃原生待处理的剪贴板建议，显式链接不受影响 |
+| `Android.shareText(text)` / `Android.copyText(text)` | 用户主动点击后调用系统文本分享选择器或复制；最多 16384 个字符。返回 boolean 表示参数通过并交给 UI 线程，系统操作失败由原生提示 |
 | `Android.getUpdateStatus()` | 同步返回版本、更新阶段、下载进度、安装来源授权及已校验包状态 |
 | `Android.checkForUpdate(requestId, proxyBase)` | 检查固定 GitHub 项目的 `update.json`；代理空字符串为直连 |
 | `Android.downloadUpdate(requestId)` | 下载最近一次原生校验过的更新；不接受网页传入的 URL 或文件路径 |
@@ -48,6 +52,7 @@
 | `window.onPdfLoaded(payload)` | 对象 `{name,base64}`，网页用随包附带的 PDF.js 本地解析和预览 |
 | `window.onPdfError(payload)` | 对象 `{message}`，读取失败时告知原因 |
 | `window.onNotificationStatus(status)` | 授权后、回到应用时及同步计划后更新通知状态 |
+| `window.onShareLinkAvailable()` | 仅通知有待处理分享，不带剪贴板原文。网页注册回调后也应主动调用 `consumeShareLink()`，已有编辑表单时自行暂存待确认项 |
 | `window.onAppUpdateEvent(event)` | 更新事件；`type` 为 `checking/available/latest/progress/downloaded/verifying/installing/permission/cancelled/error/status`，携带当前 `phase`、`busy`、`manifest` 与字节进度 |
 | `window.onScheduleSyncError(payload)` | 对象 `{message}`，计划校验或存储失败，旧有效计划继续保留 |
 | `window.onShareResult(result)` | 对象 `{requestId,ok,status,data?,message?}`；使用 requestId 与原请求配对 |
@@ -106,7 +111,7 @@
 .\android\test-notifications.ps1
 ```
 
-脚本覆盖 128 项断言：35 项调度检查、18 项通知展示检查、27 项分享边界检查、42 项更新安全检查及 6 项更新生命周期检查。更新检查包括固定仓库与资源路径、HTTPS 代理、重定向越界、证书集合、降级／重放／调试包拒绝、流式下载大小、位篡改、提前结束及取消。生命周期测试用真实 executor 和锁存器重现 Activity 销毁时任务／deadline 提交被拒绝的交错，保证不会出现未捕获线程异常。其他检查覆盖小节与课间边界、两开关独立、重启去重、elapsedRealtime 基准、考试文案、受控 PUT 与 UTF-8 限额。已发送提醒标识随当前学期计划保留；移动课程后的新时间可正常提醒。
+脚本覆盖 205 项断言：35 项调度检查、18 项通知展示检查、27 项分享网络边界检查、77 项分享入口与剪贴板检查、42 项更新安全检查及 6 项更新生命周期检查。分享入口检查包括协议与参数白名单、规范化口令、无效编码、剪贴板消息中多个不同链接拒绝、重复识别与进程恢复、显式链接优先、队列上限、关闭开关与本应用复制内容去重。更新检查包括固定仓库与资源路径、HTTPS 代理、重定向越界、证书集合、降级／重放／调试包拒绝、流式下载大小、位篡改、提前结束及取消。生命周期测试用真实 executor 和锁存器重现 Activity 销毁时任务／deadline 提交被拒绝的交错，保证不会出现未捕获线程异常。其他检查覆盖小节与课间边界、两开关独立、重启去重、elapsedRealtime 基准、考试文案、受控 PUT 与 UTF-8 限额。已发送提醒标识随当前学期计划保留；移动课程后的新时间可正常提醒。
 
 2026-10-02 小米真机验证：收起的课程状态通知正文确实显示秒级倒计时（截图从 `00:39` 变为 `00:31`）；保持前台的短课程在课间显示「课间休息／距继续上课 00:28」，下一小节切回下课倒计时；累计模式在实际经过 61 秒、其中休息 30 秒的测试中显示「累计授课 00:31」。系统权限返回时刷新权限区域并保留表单内尚未保存的 17 分钟提前量；测试后恢复真实课表与通知计划。展开布局、长时间 Doze／后台送达、设备重启后送达及实际 PDF 文件选择器仍未完成真机验证。
 
@@ -127,6 +132,16 @@
 - 原状态通知只设置标准模板的 `setUsesChronometer`，正文完全没有剩余数值；已改成两种尺寸的正文 Chronometer 和标准文字回退。新版收起正文已在小米真机验证，展开布局仍待实测。
 
 自定义通知参考：[官方布局与高度限制](https://developer.android.com/develop/ui/views/notifications/custom-notification)、[RemoteViews 计时器](https://developer.android.com/reference/android/widget/RemoteViews)。
+
+## 分享链接、系统分享与剪贴板
+
+3.2 新增两种外部入口：`https://qk.sagiri.org/s#code=<口令>&server=<编码后的HTTPS根地址>` 与 `qingke://share?code=<口令>&server=<编码后的HTTPS根地址>`。口令是 20 位 Crockford 字符，可带连字符并规范成大写；两个参数必须齐全且各出现一次，不接受其他操作、凭据、路径或参数。整条链接最多 2048 字符，服务器沿用下述 HTTPS 根地址校验，不会改变应用默认分享服务器。
+
+Manifest 为 HTTPS `/s` 单独声明自动验证 App Link，为自定义协议单独声明过滤器；实际接收仍再次严格校验 `ACTION_VIEW` 与 URI。`singleTop` 顶部实例通过 `onNewIntent` 接收，未强制清空系统返回栈；冷启动始终加载随包的本地页面。外部 Intent 的 extras、选择器和剪贴板数据都不作为操作指令，链接也不会直接加载到本地或教务 WebView。可信页面 ready、处于前台并有焦点后通知网页；教务页打开时暂存到返回课表页面。待确认队列最多 8 项、显式链接优先；保存实例状态时保留未消费项，已消费的启动链接不重放。网页负责保护编辑草稿，用户点击读取后才能联网与预览，导入另行确认。[Android 深链文档](https://developer.android.com/training/app-links/deep-linking)、[Activity 返回栈规则](https://developer.android.com/guide/components/activities/tasks-and-back-stack)。
+
+剪贴板识别默认开启，可在应用设置中关闭。只在可信课表页面前台获得焦点时读取一次单项纯文本，最多 16384 字符，不轮询、不调用 `coerceToText`、不访问剪贴板 URI；教务 WebView 打开时不读取。识别严格匹配的分享链接，普通文本与多个不同分享链接的消息都忽略。全文不进入 JavaScript、不上传、不写日志；原生私有设置只记录最近 32 个规范化分享的 SHA-256 指纹，因此拒绝后不会在后续打开应用时反复提示同一记录。显式链接唤起的当次前台跳过旧剪贴板，本应用复制或发送的分享也记为已识别。系统分享使用 `ACTION_SEND`、`text/plain` 与系统 chooser，发送目标由用户选择。[系统分享说明](https://developer.android.com/develop/ui/compose/sharing/send)、[系统剪贴板 API](https://developer.android.com/reference/android/content/ClipboardManager)。
+
+本轮 77 项纯 Java 入口测试通过；App Link 域名关联、手机冷／暖启动、系统分享界面和系统剪贴板提示的实测记录以 [TESTING.md](TESTING.md) 为准，不能由策略测试代替。
 
 ## 分享网络桥接
 

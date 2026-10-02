@@ -1,4 +1,6 @@
 import {renderCourseGrid,renderSettingsPage,refreshCourseProgress,liveMarkup} from './planner-ui.js';
+import {showConflictDetails} from './conflict-ui.js';
+import {createShareEntry} from './share-entry.js';
 import {createUpdateUI} from './update-ui.js';
 import {createManagementUI} from './manage-ui.js';
 import {createExamUI} from './exams-ui.js';
@@ -10,7 +12,7 @@ import {loadState,commitState,recoveries,STATE_KEY} from './state-store.js';
 import {parseSchedule} from './importer.js';
 import {esc,clone,icon,DAYS,button,select,field,input,weeksText,toast,sheet,closeSheet,backSheet,errorBox,submit} from './ui.js';
 
-let state,storageError='',sharing,management,exams,motion,updater,importTargetId='',returnToImport=false;
+let state,storageError='',sharing,management,exams,motion,updater,shareEntry,importTargetId='',returnToImport=false;
 try{state=loadState();}catch(e){storageError=e.message;state=createState();}
 const app=document.querySelector('#app');
 const tabHistory=[];
@@ -119,13 +121,14 @@ function navigatePage(delta){if(state.preferences.viewMode==='three')threeStart=
 const managerContext={getState:()=>state,getSemester:semester,save,reviewSemester,confirmChange,refresh:refreshContext};
 management=createManagementUI(managerContext);exams=createExamUI(managerContext);sharing=createShareUI({...managerContext,canSync:()=>!document.hidden&&!document.querySelector('#modal-root').firstChild,onSynced:()=>render()});
 updater=createUpdateUI();
+shareEntry=createShareEntry({openShare:entry=>sharing.openShare(entry),isOwnShare:entry=>sharing.isOwnShare(entry)});
 motion=installTimetableMotion({root:app,onNavigate:navigatePage});
 document.addEventListener('click',async event=>{
   if(motion?.suppressClick()){event.preventDefault();return;}
   if(event.target.hasAttribute('data-backdrop')){goBack();return;}
   const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
   const {action,id}=el.dataset;
-  try{if(await updater.click(action,el)||management.click(action,el)||exams.click(action,el)||await sharing.click(action,el))return;switch(action){
+  try{if(shareEntry.click(action,el)||await updater.click(action,el)||management.click(action,el)||exams.click(action,el)||await sharing.click(action,el))return;switch(action){
     case 'close':returnToImport=false;closeSheet();break;
     case 'sheet-back':goBack();break;
     case 'tab':if(tab!==el.dataset.tab){tabHistory.push({tab,scroll:window.scrollY});if(tabHistory.length>20)tabHistory.shift();tab=el.dataset.tab;render();window.scrollTo(0,0);motion.animateTab();}break;
@@ -141,6 +144,7 @@ document.addEventListener('click',async event=>{
     case 'import-new-semester':returnToImport=true;management.click('new-semester',el);break;
     case 'edit':editCourse(id);break;
     case 'detail':detail(id);break;
+    case 'conflict-detail':occurrencesOn(semester(),el.dataset.date).forEach(o=>occurrenceMap.set(o.id,o));showConflictDetails({semester:semester(),date:el.dataset.date,id});break;
     case 'all-courses':allCourses();break;
     case 'color':document.querySelectorAll('.color-dot').forEach(x=>x.classList.toggle('selected',x===el));break;
     case 'add-session':readCourseDraft();courseDraft.sessions.push(newSession());showCourseEditor();break;
@@ -199,7 +203,7 @@ document.addEventListener('change',event=>{
 });
 document.addEventListener('submit',async event=>{
   event.preventDefault();const form=event.target,values=Object.fromEntries(new FormData(form)),error=form.querySelector('#form-error');if(error)error.textContent='';
-  try{if(await updater.submit(form,values)||management.submit(form,values)||exams.submit(form,values)||await sharing.submit(form,values))return;switch(form.id){
+  try{if(shareEntry.submit(form,values)||await updater.submit(form,values)||management.submit(form,values)||exams.submit(form,values)||await sharing.submit(form,values))return;switch(form.id){
     case 'course-form':{
       readCourseDraft();const s=clone(semester()),old=s.courses.find(c=>c.id===courseDraft.id),newIds=new Set(courseDraft.sessions.map(x=>x.id));
       if(old){const removed=new Set(old.sessions.filter(x=>!newIds.has(x.id)).map(x=>x.id));s.exceptions=s.exceptions.filter(e=>!removed.has(e.sessionId));}
@@ -259,7 +263,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'){goBack();}i
 let previousDate=localDate(),previousWeek=currentWeek();
 function refreshClock(){if(document.hidden||document.querySelector('#modal-root').firstChild)return;const date=localDate();if(date!==previousDate){if(week===clampWeek(previousWeek))week=clampWeek(currentWeek());if(threeStart===previousDate)threeStart=date;previousDate=date;previousWeek=currentWeek();syncNative();render();}else if(tab==='today')render();else if(tab==='table')refreshCourseProgress(app,occurrenceMap);}
 document.addEventListener('visibilitychange',refreshClock);window.addEventListener('focus',refreshClock);setInterval(refreshClock,30000);
-window.addEventListener('focus',()=>{refreshNotificationStatus();sharing.onForeground?.();});
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshNotificationStatus();sharing.onForeground?.();}});
-setInterval(()=>{if(!document.hidden&&!document.querySelector('#modal-root').firstChild)refreshCourseProgress(app,occurrenceMap);},1000);
-render();syncNative();sharing.onForeground?.();
+window.addEventListener('focus',()=>{refreshNotificationStatus();sharing.onForeground?.();shareEntry.foreground();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshNotificationStatus();sharing.onForeground?.();shareEntry.foreground();}});
+setInterval(()=>{if(!document.hidden){const modal=document.querySelector('#modal-root');refreshCourseProgress(modal.firstChild?modal:app,occurrenceMap);}},1000);
+render();syncNative();shareEntry.foreground();sharing.onForeground?.();

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="在清课中打开朋友分享的课表，核对后再导入。">
+  <meta name="referrer" content="no-referrer"><meta name="theme-color" content="#f8f6ee">
+  <title>一份课表，等你打开 · 清课</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/site.css">
+  <script type="module" src="/site.js"></script>
+</head>
+<body class="share-page">
+  <div class="site-shell">
+    <header class="site-header"><a class="wordmark" href="/" aria-label="清课首页"><img src="/icon.svg" width="40" height="40" alt=""><span>清课<small>QINGKE</small></span></a><a class="text-link" href="/">了解清课 <span aria-hidden="true">↗</span></a></header>
+    <main id="main" class="share-main">
+      <p class="eyebrow">朋友分享的课程表</p><h1>下一堂课，<br>一起出发。</h1>
+      <p class="share-intro">在清课中核对这份课表，再决定是否导入。</p>
+      <section class="share-envelope" aria-label="课表分享链接">
+        <div class="envelope-heading"><img src="/icon.svg" width="38" height="38" alt=""><span>一份课表，等你打开<small>QINGKE · TIMETABLE</small></span><span class="envelope-stamp" aria-hidden="true">课</span></div>
+        <p id="share-error" class="share-error" role="alert" hidden></p>
+        <div id="share-values" hidden><label class="code-label" for="share-code">分享口令</label><input id="share-code" class="share-code" readonly spellcheck="false" autocomplete="off" aria-describedby="copy-status"><div class="share-source"><span>分享服务</span><b id="share-host"></b></div><p class="server-note">请确认这是你信任的分享服务。</p></div>
+        <p id="wechat-note" class="browser-note" hidden>微信内可能无法打开应用。请点右上角「···」，选择在浏览器中打开，再点下方按钮。</p>
+        <div class="share-buttons"><button id="open-app" class="button primary" type="button" disabled>打开清课 <span aria-hidden="true">↗</span></button><button id="copy-code" class="button secondary" type="button" disabled>复制分享消息</button></div>
+        <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
+        <p class="share-boundary">此网页只展示链接中的口令和服务地址，<br>不会读取、下载或预览你的课表内容。</p>
+        <noscript><p class="share-error">请允许此页面运行 JavaScript 以读取分享链接。也可请朋友把口令单独发给你，再到清课中手动导入。</p></noscript>
+      </section>
+      <div id="open-fallback" class="open-fallback" role="status" hidden><strong>没有打开应用？</strong><p>浏览器无法可靠判断是否已安装。你可以下载清课，或复制分享消息后打开应用。也可在「分享与跟随」中手动填写口令与服务地址。</p></div>
+      <p class="share-download">还没有清课？ <a data-download="proxy" href="https://github.com/SAGIRIxr/qingke/releases" rel="noreferrer">下载 Android 版 ↓</a><span> / </span><a data-download="official" href="https://github.com/SAGIRIxr/qingke/releases" rel="noreferrer">GitHub 直连</a></p>
+      <p class="share-download-note">Android 8.0 及以上 · <span data-release-version>正式版</span><br>下载由你主动选择，不会自动开始。</p>
+    </main>
+    <footer class="site-footer"><span>清课 <span class="footer-dot">/</span> 把时间，留给课堂。</span><a href="/">返回首页 ↗</a></footer>
+  </div>
+</body>
+</html>

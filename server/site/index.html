@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="清课，一张安静的 Android 课程表。没有广告，课表保存在本机；支持教务与 PDF 导入、调课、提醒和可选分享。">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#f8f6ee">
+  <title>清课 · 把时间，留给课堂</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site.css">
+  <script type="module" src="/site.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="清课首页"><img src="/icon.svg" width="40" height="40" alt=""><span>清课<small>QINGKE</small></span></a>
+      <nav aria-label="主导航"><a href="#features">功能</a><a href="#privacy">隐私</a><a class="nav-github" href="https://github.com/SAGIRIxr/qingke" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a></nav>
+    </header>
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> 一张安静的课程表</p>
+          <h1 id="hero-title">把时间，<br>留给<span class="title-accent">课堂。</span></h1>
+          <p class="hero-description">打开就能看课表。<br>没有广告，也不用再注册一个账号。</p>
+          <div class="hero-actions"><a class="button primary" href="#download">下载 Android 版 <span aria-hidden="true">↓</span></a><a class="text-link" href="#features">看看它能做什么 <span aria-hidden="true">↗</span></a></div>
+          <p class="hero-note">本地保存 <span>·</span> 离线可看 <span>·</span> 无广告</p>
+        </div>
+        <figure class="timetable-scene" aria-label="虚构课表示意：一周内的高等数学、大学英语、程序设计、体育与通识课程">
+          <div class="demo-sheet">
+            <div class="demo-title"><div><span class="demo-kicker">新的学期，从容一点</span><h2>这一周</h2></div><span class="demo-week">第 06 周 <i aria-hidden="true">⌄</i></span></div>
+            <div class="demo-calendar" aria-hidden="true">
+              <div class="demo-day blank">10月</div><div class="demo-day">周一<b>12</b></div><div class="demo-day today">周二<b>13</b></div><div class="demo-day">周三<b>14</b></div><div class="demo-day">周四<b>15</b></div><div class="demo-day">周五<b>16</b></div>
+              <div class="demo-period p1">01<small>08:00<br>09:40</small></div><div class="demo-period p2">03<small>10:00<br>11:40</small></div><div class="demo-period p3">05<small>14:00<br>15:40</small></div>
+              <div class="demo-course math"><strong>高等数学</strong><span>明理楼 201</span><small>1–2 节</small></div>
+              <div class="demo-course english"><strong>大学英语</strong><span>博学楼 302</span><small>3–4 节</small></div>
+              <div class="demo-course coding"><strong>程序设计</strong><span>实验楼 206</span><small>上课中</small><i class="demo-progress"></i></div>
+              <div class="demo-course sports"><strong>体育</strong><span>田径场</span><small>5–6 节</small></div>
+              <div class="demo-course reading"><strong>通识课程</strong><span>知行楼 101</span><small>1–2 节</small></div>
+              <div class="demo-course lab"><strong>程序实验</strong><span>实验楼 206</span><small>5–6 节</small></div>
+            </div>
+            <div class="demo-bottom"><span><i></i> 上课、课间，心里有数</span><span aria-hidden="true">✦</span></div>
+          </div>
+          <figcaption><span class="sample-mark">示意</span> 课程、地点及日期均为虚构展示</figcaption>
+        </figure>
+      </section>
+      <section id="features" class="features" aria-labelledby="features-title">
+        <div class="section-intro"><p class="eyebrow">少一点操作，多一点清楚</p><h2 id="features-title">从开学，到每一次调课。</h2></div>
+        <div class="feature-list">
+          <article><span class="feature-number">01 / 录入</span><h3>课表，不必从头填。</h3><p>从正方教务网页、文字型 PDF 或粘贴文字导入。先核对再保存，也可以手动编辑。</p><span class="feature-footnote">不同学校模板可能需要适配</span></article>
+          <article><span class="feature-number">02 / 安排</span><h3>临时变化，也有条理。</h3><p>多学期、单双周、夏冬作息。月历多选停补课，或只调整某一堂课的时间和教室。</p><span class="feature-footnote">考试使用独立日期与考场</span></article>
+          <article><span class="feature-number">03 / 提醒</span><h3>下一堂课，提前知道。</h3><p>课前提醒、上课进度与课间状态。系统提醒由你开启，离线时也能查看课程。</p><span class="feature-footnote">送达受系统权限和省电策略影响</span></article>
+        </div>
+      </section>
+      <section id="privacy" class="privacy-section" aria-labelledby="privacy-title">
+        <div><p class="eyebrow">你的课表，由你决定</p><h2 id="privacy-title">留在本机。<br>分享，由你选择。</h2></div>
+        <div class="privacy-copy"><p>日常查看与编辑保存在手机里，没有广告 SDK，也没有统计服务。教务登录由你在学校页面完成；PDF 在本机解析。</p><p>想把课表交给朋友时，再生成分享口令。默认不上传备注和考试；只有主动分享或开启持续分享后，所选内容才会发送到分享服务器。</p><p class="privacy-detail">分享服务器可读取已上传内容，持有口令的人也可以读取。卸载前请导出备份；分享凭证与跟随关系不包含在普通课表备份中。</p><a class="text-link" href="https://github.com/SAGIRIxr/qingke#备份恢复与隐私" rel="noreferrer">阅读完整说明 <span aria-hidden="true">↗</span></a></div>
+      </section>
+      <section id="download" class="download-section" aria-labelledby="download-title">
+        <img class="download-icon" src="/icon.svg" width="72" height="72" alt="清课图标">
+        <p class="eyebrow">下一周，从清课开始</p><h2 id="download-title">装好课表，轻松一点。</h2>
+        <p class="download-meta">Android 8.0 及以上 <span>·</span> <span data-release-version>正式版</span></p>
+        <div class="download-actions"><a class="button primary" data-download="proxy" href="https://github.com/SAGIRIxr/qingke/releases" rel="noreferrer">下载 APK · GH-Proxy <span aria-hidden="true">↓</span></a><a class="button secondary" data-download="official" href="https://github.com/SAGIRIxr/qingke/releases" rel="noreferrer">GitHub 官方下载 <span aria-hidden="true">↗</span></a></div>
+        <p class="download-note">GH-Proxy 为第三方下载代理，可自行选择 GitHub 直连。<br>同签名新版可直接覆盖安装；建议升级前先导出备份。</p>
+        <noscript><p class="download-note">JavaScript 未开启，下载按钮将进入 GitHub 发布列表，请选择所需正式 APK。</p></noscript>
+      </section>
+    </main>
+    <footer class="site-footer"><span>清课 <span class="footer-dot">/</span> 把时间，留给课堂。</span><div><a data-download="release" href="https://github.com/SAGIRIxr/qingke/releases" rel="noreferrer">版本记录</a><a href="https://github.com/SAGIRIxr/qingke" rel="noreferrer">源代码 ↗</a></div></footer>
+  </div>
+</body>
+</html>

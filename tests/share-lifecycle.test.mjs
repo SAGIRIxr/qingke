@@ -23,6 +23,20 @@ function remote(semester,revision=1,allowFollow=true){return {...sharePayload(se
 function owner(env,allowFollow=true){return {code:CODE,server:SERVER,deleteToken:'valid-management-token-1234',localSemesterId:env.state.semesters[0].id,name:'共享学期',allowFollow,autoPublish:allowFollow,revision:1,includeNotes:false,includeExams:false,createdAt:'2026-01-01T00:00:00Z',expiresAt:'2099-01-01T00:00:00Z'};}
 const button=dataset=>({dataset,disabled:false});
 
+test('外部链接只展示确认表单，不请求网络、不改变默认服务或现有学期',t=>{
+ const env=environment(t);let network=0;t.mock.method(globalThis,'fetch',()=>{network++;throw Error('Must not fetch before confirmation');});
+ const ui=createShareUI(env.ctx);ui.openShare({code:'0123456789ABCDEFGHJK',server:'https://friend.example',source:'clipboard'});
+ assert.match(env.modal.innerHTML,/发现剪贴板中的清课分享/);assert.match(env.modal.innerHTML,/https:\/\/friend.example/);
+ assert.equal(network,0);assert.equal(env.saved,0);assert.equal(env.state.preferences.shareServerUrl,SERVER);
+});
+
+test('粘贴的整段消息指向不同服务时先核对来源，未确认不联网',async t=>{
+ const env=environment(t);let network=0;t.mock.method(globalThis,'fetch',()=>{network++;throw Error('Must not fetch before source review');});
+ const ui=createShareUI(env.ctx),{shareMessage}=await import('../www/share-links.js');
+ await ui.submit({id:'share-receive-form'},{code:shareMessage({code:'0123456789ABCDEFGHJK',server:'https://friend.example'}),server:SERVER});
+ assert.equal(network,0);assert.equal(env.saved,0);assert.match(env.modal.innerHTML,/https:\/\/friend.example/);
+});
+
 test('手动检查慢响应不能覆盖新编辑弹窗，也不直接修改正在编辑的学期',async t=>{
   const env=environment(t),waiting=defer(),source=env.state.semesters[0];
   const manager=createFollowManager(env.ctx,{records:()=>[],request:()=>waiting.promise});
