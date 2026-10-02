@@ -39,7 +39,8 @@ class SiteTests(unittest.TestCase):
                 headers = response['headers']
                 self.assertEqual(headers['Content-Type'], mime)
                 self.assertEqual(headers['Content-Length'], str(len(response['body'])))
-                self.assertEqual(headers['Cache-Control'], 'no-store')
+                self.assertEqual(headers['Cache-Control'], 'no-store, no-transform')
+                self.assertEqual(headers['Strict-Transport-Security'], 'max-age=31536000')
                 self.assertEqual(headers['Referrer-Policy'], 'no-referrer')
                 self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
                 self.assertIn("connect-src 'none'", headers['Content-Security-Policy'])

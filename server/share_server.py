@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from urllib.parse import urlsplit
 
-from share_schema import InvalidPayload, normalize_payload
+from share_schema import InvalidPayload, normalize_payload, validate_share_budget
 
 LOG = logging.getLogger('qingke-share')
 ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
@@ -37,6 +37,8 @@ SITE_FILES = {
     '/.well-known/assetlinks.json': ('assetlinks.json', 'application/json; charset=utf-8'),
 }
 SITE_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
+# Only this HTTPS host is covered: no preload or includeSubDomains opt-in.
+HSTS = 'max-age=31536000'
 
 
 @dataclass
@@ -171,7 +173,14 @@ class Store:
             row = db.execute('SELECT payload, expires_at, revision, allow_follow, updated_at FROM shares WHERE code_hash = ? AND expires_at > ?', (digest(code), now)).fetchone()
         if not row:
             raise ApiError(404, 'not_found', '口令不存在、已过期或已撤销')
-        return {**json.loads(row[0]), 'expiresAt': expires_iso(row[1]), 'revision': row[2], 'allowFollow': bool(row[3]), 'updatedAt': expires_iso(row[4])}
+        payload = json.loads(row[0])
+        try:
+            validate_share_budget(payload['semester'])
+        except InvalidPayload:
+            # Shares created before resource budgets existed must not bypass them.
+            # Keep the record so its owner can simplify/update it or revoke it.
+            raise ApiError(400, 'share_too_complex', '此课表安排过于密集，请分享者撤销原分享，精简后重新分享') from None
+        return {**payload, 'expiresAt': expires_iso(row[1]), 'revision': row[2], 'allowFollow': bool(row[3]), 'updatedAt': expires_iso(row[4])}
 
     def update(self, code, token, payload, expected_revision, allow_follow, days=None, now=None):
         now = int(time.time() if now is None else now)
@@ -281,9 +290,10 @@ class ShareApp:
             if path == '/api/shares':
                 if method != 'POST':
                     raise ApiError(405, 'method_not_allowed', '此接口只接受 POST')
-                self.limiter.check(ip, ['create', 'global_create'])
                 body = self.read_json(env)
                 payload, days = normalize_payload(body)
+                # Bad bodies spend request limits, not the hourly creation quota.
+                self.limiter.check(ip, ['create', 'global_create'])
                 return self.respond(start_response, 201, self.store.create(payload, days, allow_follow=body.get('allowFollow', False)), cors, request_id)
             match = re.fullmatch(r'/api/shares/([A-Za-z0-9-]{20,24})', path)
             if not match:
@@ -337,7 +347,8 @@ class ShareApp:
                 # Do not expose local paths or exception text if deployment is incomplete.
                 status, raw, content_type = 503, b'Page temporarily unavailable', 'text/plain; charset=utf-8'
         headers = [('Content-Type', content_type), ('Content-Length', str(len(raw))),
-                   ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff'),
+                   ('Cache-Control', 'no-store, no-transform'), ('X-Content-Type-Options', 'nosniff'),
+                   ('Strict-Transport-Security', HSTS),
                    ('Referrer-Policy', 'no-referrer'), ('Content-Security-Policy', SITE_CSP),
                    ('X-Frame-Options', 'DENY'), ('Cross-Origin-Resource-Policy', 'same-origin'),
                    ('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')]
@@ -381,6 +392,7 @@ class ShareApp:
         headers = [('Content-Type', 'application/json; charset=utf-8'), ('Content-Length', str(len(raw))),
                    ('Cache-Control', 'no-store'), ('Pragma', 'no-cache'), ('X-Content-Type-Options', 'nosniff'),
                    ('Referrer-Policy', 'no-referrer'), ('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'"),
+                   ('Strict-Transport-Security', HSTS),
                    ('X-Request-Id', request_id), ('Vary', 'Origin')]
         if origin:
             headers.append(('Access-Control-Allow-Origin', origin))

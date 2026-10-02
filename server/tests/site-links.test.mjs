@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {parseShareFragment, shareAppLinks, shareMessage} from '../site/share-link.js';
 import {releaseLinks} from '../site/site-config.js';
+import {parseShareLink} from '../../www/share-links.js';
 
 const code = '0123456789ABCDEFGHJK';
 const fragment = `#code=${code}&server=https%3A%2F%2Fshare.example`;
@@ -33,6 +34,19 @@ test('intent package, scheme and fallback are fixed; share values stay URL encod
   assert.ok(result.intent.startsWith('intent://share?code='+code+'&server=https%3A%2F%2Fshare.example#Intent;scheme=qingke;package=cn.qingke.app;'));
   assert.ok(result.intent.endsWith('S.browser_fallback_url='+encodeURIComponent(result.fallback)+';end'));
   assert.equal((result.intent.match(/#Intent/g)||[]).length, 1);
+});
+
+test('website and app agree on accepted server ports before sharing a link', () => {
+  for (const port of ['0', '00000']) {
+    const server = 'https://share.example:' + port;
+    assert.throws(() => parseShareFragment('#' + new URLSearchParams({code, server})));
+    assert.throws(() => shareAppLinks({code, server}));
+    assert.throws(() => shareMessage({code, server}));
+  }
+  for (const server of ['https://share.example:443', 'https://share.example:8443', 'https://share.example:65535']) {
+    const share = parseShareFragment('#' + new URLSearchParams({code, server}));
+    assert.deepEqual(parseShareLink(shareAppLinks(share).landing), {code, server: share.server});
+  }
 });
 
 test('copying a share produces a recognisable app link and no owner credentials', () => {

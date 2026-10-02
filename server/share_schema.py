@@ -2,6 +2,10 @@
 import datetime as dt
 import re
 
+MAX_SHARE_OCCURRENCES = 10000
+MAX_SHARE_DAILY_OCCURRENCES = 128
+MAX_SHARE_CONFLICT_REFERENCES = 200000
+
 
 class InvalidPayload(ValueError):
     pass
@@ -17,7 +21,11 @@ def text(value, limit, label, required=False):
     if not isinstance(value, str):
         raise InvalidPayload(f'{label}必须是文字')
     value = value.strip()
-    if len(value) > limit or (required and not value) or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff]', value):
+    # Reject lone UTF-16 surrogates before encoding. JS validates string.length,
+    # so astral characters must count as two code units on the server as well.
+    if (required and not value) or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff]', value):
+        raise InvalidPayload(f'{label}为空、超长或含无效字符')
+    if len(value) > limit or len(value.encode('utf-16-le')) // 2 > limit:
         raise InvalidPayload(f'{label}为空、超长或含无效字符')
     return value
 
@@ -47,7 +55,7 @@ def array(value, maximum, label, minimum=0):
 
 
 def date(value, label='日期'):
-    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
         raise InvalidPayload(f'{label}格式必须是 YYYY-MM-DD')
     try:
         parsed = dt.date.fromisoformat(value)
@@ -59,7 +67,7 @@ def date(value, label='日期'):
 
 
 def clock(value):
-    if not isinstance(value, str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', value):
+    if not isinstance(value, str) or not re.fullmatch(r'(?:[01][0-9]|2[0-3]):[0-5][0-9]', value):
         raise InvalidPayload('时间必须是 HH:MM')
     return value
 
@@ -72,6 +80,66 @@ def unique(rows, key, label):
 
 def identifier(raw):
     return text(raw.get('id'), 120, '编号', True)
+
+
+def validate_share_budget(semester):
+    """Bound client expansion of an already normalized semester, without a graph.
+
+    A same-day pair is conservatively counted as a possible conflict even when
+    its times differ. This bounds the client's quadratic conflict arrays. The
+    raw candidate cap is intentional: cancellations cannot hide huge input.
+    Call this when accepting a share and before returning older stored shares.
+    """
+    start = dt.date.fromisoformat(semester['startDate'])
+    monday = start - dt.timedelta(days=start.weekday())
+    sessions = [s for course in semester['courses'] for s in course['sessions']]
+    exams = semester.get('exams', [])
+    candidates = len(exams)
+    for session in sessions:
+        candidates += len(session['weeks']) - int(1 in session['weeks'] and session['day'] < start.isoweekday())
+        if candidates > MAX_SHARE_OCCURRENCES:
+            raise InvalidPayload('分享课表展开后的候选安排超过 10000 次，请减少分享内容')
+    if candidates > MAX_SHARE_OCCURRENCES:
+        raise InvalidPayload('分享课表展开后的候选安排超过 10000 次，请减少分享内容')
+
+    rules = {r['date']: r for r in semester.get('dayRules', [])}
+    destinations = {r['sourceDate']: r['date'] for r in rules.values() if r['type'] == 'replace'}
+    exceptions = {(e['sessionId'], e['sourceDate']): e for e in semester.get('exceptions', [])}
+    counts = {}
+    total = references = 0
+
+    def add(value):
+        nonlocal total, references
+        previous = counts.get(value, 0)
+        if previous >= MAX_SHARE_DAILY_OCCURRENCES:
+            raise InvalidPayload('分享课表同一天的实际安排超过 128 次，请减少分享内容')
+        total += 1
+        references += 2 * previous  # n*(n-1) - (n-1)*(n-2)
+        if total > MAX_SHARE_OCCURRENCES or references > MAX_SHARE_CONFLICT_REFERENCES:
+            raise InvalidPayload('分享课表展开或同日安排过于密集，请减少分享内容')
+        counts[value] = previous + 1
+
+    for session in sessions:
+        for week in session['weeks']:
+            source = monday + dt.timedelta(days=(week - 1) * 7 + session['day'] - 1)
+            if source < start:
+                continue
+            source = source.isoformat()
+            exception = exceptions.get((session['id'], source))
+            if exception and exception['type'] == 'cancel':
+                continue
+            # Individual moves remain effective on an off/replacement day,
+            # matching occurrencesOn; they are not cloned with their source.
+            if exception and exception['type'] == 'move':
+                add(exception['date'])
+            elif source in destinations:
+                add(destinations[source])
+            elif source not in rules:
+                add(source)
+    # Exams are independent of teaching-day rules and seasonal periods.
+    for exam in exams:
+        add(exam['date'])
+    return {'occurrences': total, 'maxPerDay': max(counts.values(), default=0), 'conflictReferences': references}
 
 
 def normalize_payload(raw, updating=False):
@@ -97,7 +165,7 @@ def normalize_payload(raw, updating=False):
     for p in array(source.get('profiles'), 30, '作息方案', 1):
         obj(p, 'id name effectiveFrom periods', '作息方案')
         effective = p.get('effectiveFrom')
-        if not isinstance(effective, str) or not re.fullmatch(r'\d{2}-\d{2}', effective):
+        if not isinstance(effective, str) or not re.fullmatch(r'[0-9]{2}-[0-9]{2}', effective):
             raise InvalidPayload('作息生效日期必须是 MM-DD')
         date('2000-' + effective, '作息生效日期')
         profile = dict(id=identifier(p), name=text(p.get('name'), 50, '作息名称', True), effectiveFrom=effective, periods=[])
@@ -186,4 +254,5 @@ def normalize_payload(raw, updating=False):
                 exam['courseId'] = text(e['courseId'], 120, '关联课程', True)
             result['exams'].append(exam)
         unique(result['exams'], lambda e: e['id'], '考试编号')
+    validate_share_budget(result)
     return {'format': 'qingke-semester', 'version': 1, 'semester': result}, days

@@ -13,7 +13,7 @@ export function parseShareFragment(fragment) {
   if (!raw || raw.length > 500 || /[\s\\?#]/.test(raw)) throw Error('分享服务地址无效');
   let url;
   try { url = new URL(raw); } catch { throw Error('分享服务地址无效'); }
-  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.pathname !== '/' || url.search || url.hash)
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.port === '0')
     throw Error('分享服务须使用不带路径的 HTTPS 地址');
   // Show the canonical/punycode domain, without allowing a supplied display name.
   return {code, server: url.origin, host: url.host};

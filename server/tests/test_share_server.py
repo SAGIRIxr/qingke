@@ -169,6 +169,37 @@ class ShareTests(unittest.TestCase):
         self.assertEqual(data['error']['code'], 'rate_limited')
         self.assertGreater(int(headers['Retry-After']), 0)
 
+    def test_invalid_creates_do_not_consume_hourly_quota_but_request_limit_still_applies(self):
+        self.app.limiter = RateLimiter({'request': (5, 60), 'create': (1, 3600)})
+        for _ in range(2):
+            self.assertEqual(self.request('POST', body={})[0], 400)
+        self.assertEqual(self.request('POST', body=fixture())[0], 201)
+        self.assertEqual(self.request('POST', body=fixture())[0], 429)
+        self.assertEqual(self.request('GET', '/healthz')[0], 200)
+        self.assertEqual(self.request('GET', '/healthz')[0], 429)
+        with self.app.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM shares').fetchone()[0], 1)
+
+    def test_old_dense_share_is_blocked_on_read_but_owner_can_revoke(self):
+        payload, _ = normalize_payload(fixture())
+        semester = payload['semester']
+        template = copy.deepcopy(semester['courses'][0])
+        semester['courses'], semester['dayRules'], semester['exceptions'] = [], [], []
+        for group in range(2):
+            course = copy.deepcopy(template)
+            course['id'] = f'legacy-c{group}'
+            course['sessions'] = [dict(template['sessions'][0], id=f'legacy-s{group}-{i}', weeks=[1]) for i in range(65)]
+            semester['courses'].append(course)
+        # Simulate a normalized share that predates admission budgets.
+        created = self.app.store.create(payload, 1)
+        path = '/api/shares/' + created['code']
+        status, data, _ = self.request('GET', path)
+        self.assertEqual(status, 400)
+        self.assertEqual(data['error']['code'], 'share_too_complex')
+        with self.app.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM shares').fetchone()[0], 1)
+        self.assertEqual(self.request('DELETE', path, headers={'HTTP_AUTHORIZATION': 'Bearer ' + created['deleteToken']})[0], 204)
+
     def test_read_guess_limit_and_window_reset(self):
         limiter = RateLimiter({'read': (2, 60)})
         limiter.check('192.0.2.1', ['read'], now=10)

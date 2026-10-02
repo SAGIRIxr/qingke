@@ -6,7 +6,7 @@ Python 3.11+ 标准库 SQLite / WSGI 应用。生产运行使用独立虚拟环�
 
 固定静态路由为 `/`、`/s`、`/site.css`、`/site.js`、`/site-config.js`、`/share-link.js`、`/icon.svg` 和 `/.well-known/assetlinks.json`，只接受 GET / HEAD。文件映射明确列出，请求路径不会直接拼接到磁盘路径。静态页面独立于 API 的 Origin 检查与配额，访问官网不会消耗创建、读取等分享额度；已有 API 的校验、限速和缓存规则保持独立。
 
-主页以 `site/site-config.js` 集中维护发布版本与固定下载来源。更新版本时只修改 `RELEASE.version`，对应 GitHub Release 中的 `qingke-X.Y.Z-release.apk`；正式 APK 可用后再部署页面。下载按钮分别直达固定项目的官方资源和 GH-Proxy 前缀，没有接受用户指定 URL 的下载或重定向接口。主页课表示意完全虚构，页面没有统计、外部字体或第三方脚本。
+主页以 `site/site-config.js` 集中维护发布版本与固定下载来源。更新版本时只修改 `RELEASE.version`，对应 GitHub Release 中的 `qingke-X.Y.Z-release.apk`；正式 APK 可用后再部署页面。下载按钮分别直达固定项目的官方资源和 GH-Proxy 前缀，没有接受用户指定 URL 的下载或重定向接口。主页课表示意完全虚构，页面源码不包含统计、外部字体或第三方脚本；CDN 注入与响应头需在公网单独核对。
 
 分享链接格式：
 
@@ -19,6 +19,10 @@ https://qk.sagiri.org/s#code=0123456789ABCDEFGHJK&server=https%3A%2F%2Fqk.sagiri
 用户点击「打开清课」后才尝试唤起：Android 使用固定包 `cn.qingke.app` 的 `intent://share?...#Intent;scheme=qingke;package=cn.qingke.app;...;end`，其他浏览器使用 `qingke://share?...`。Chrome fallback 固定为 `https://qk.sagiri.org/s?fallback=1#...`，不会再次自动唤起。页面只在未切到后台时延时显示手动操作提示，不能据此判断应用是否安装；pagehide / visibilitychange 会取消提示计时。微信内提示改用浏览器打开。不自动下载 APK，也不自动读取剪贴板。
 
 `/.well-known/assetlinks.json` 绑定包 `cn.qingke.app` 与已有公开签名证书，不能替换为本机另签的证书。原生 App Link 是否生效仍需正式 HTTPS 部署后由 Android 验证。页面统一返回严格 CSP（`connect-src 'none'`、不允许内联脚本和嵌入框架）、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`；不设置 Cookie。
+
+响应使用 `Cache-Control: no-store, no-transform`，禁止缓存并要求中间代理不修改内容。HTTPS 响应还声明仅作用于当前主机的 HSTS，不包含 `includeSubDomains` 或 `preload`，避免影响同一域下的其他服务；浏览器通过普通 HTTP 收到的 HSTS 不生效，公网仍必须配置 HTTPS 和 HTTP 到 HTTPS 的跳转。部署后应核对公网响应，因为 CDN 可以改写源站响应头与 HTML。
+
+若使用 Cloudflare，请在对应站点关闭 Web Analytics 自动注入，保留现有 CSP，不为统计脚本放宽它。`no-transform` 可阻止自动 HTML 注入，但不等于关闭 Network Error Logging（NEL）：NEL 由 `NEL` / `Report-To` 响应头独立控制，在支持它的浏览器中可能向 Cloudflare 上报网络错误信息。其控制台开关属于 zone 级，关闭前先核对其他子域是否依赖该功能；源站不应宣称已替用户关闭 CDN 遥测。参考：[Cloudflare Web Analytics 设置](https://developers.cloudflare.com/web-analytics/get-started/)、[Cloudflare NEL 与隐私说明](https://developers.cloudflare.com/network-error-logging/)。
 
 ## 接口
 
@@ -54,7 +58,7 @@ https://qk.sagiri.org/s#code=0123456789ABCDEFGHJK&server=https%3A%2F%2Fqk.sagiri
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
-| 400 | invalid_payload / invalid_request | 格式、字段、引用或协议无效 |
+| 400 | invalid_payload / invalid_request / share_too_complex | 格式、字段、引用或协议无效，或既有分享超出展开预算 |
 | 403 | forbidden | Origin / CORS 预检不在允许范围 |
 | 404 | not_found | 口令失效、接口不存在或撤销令牌无效 |
 | 405 | method_not_allowed | 方法错误 |
@@ -83,9 +87,13 @@ https://qk.sagiri.org/s#code=0123456789ABCDEFGHJK&server=https%3A%2F%2Fqk.sagiri
 
 ## 限制与安全边界
 
+除 JSON 大小和数组长度限制，分享还受展开预算约束：实际开学后的课程候选及考试合计最多 10,000 次，调整后单日最多 128 次安排，同日潜在冲突引用总和最多 200,000。后者按每一天的 `n × (n − 1)` 保守计算，避免接收端构建过大的冲突列表；停课、补课、单次移动和考试都计入。创建、更新与旧分享读取均检查，旧分享超限时不删除记录，分享者可撤销后精简再分享。详细审查与尚未解决的代理／客户端边界见 [安全复审记录](SECURITY_REVIEW.md)。
+
 静态分享默认有效期 7 天，可选 1–30 天；allowFollow 为 true 时默认 180 天，可选 1–365 天。每 300 秒自动清理过期数据，创建/更新时也清理。读取即时校验到期时间，不受清理间隔影响。最多 5000 份有效分享、100 MiB 有效内容，SQLite 主库最大 200 MiB，回滚日志受单次事务影响且提交后删除；启用 secure_delete 和渐进回收。数据库和目录权限分别 0600 / 0700。课表内容本身是服务器可读取的明文，不是端到端加密；服务器管理员属于信任边界。
 
 限速由单个 Gunicorn worker 内存统一执行：每 IP 总请求 120/分钟，读取 60/分钟且 300/小时，创建 12/小时，更新 60/小时，撤销 30/分钟；全局 600/分钟、创建 200/小时、更新 600/小时。限速桶最多 10000，重启或 worker 回收会重置计数。生产配置固定 1 个 worker、8 线程，不可直接增加 worker 数绕过统一限速。上游还可加反代限流及网络防护；应用限速不能替代运营商的分布式攻击防护。
+
+无效创建请求消耗请求级额度，不消耗按小时计算的创建额度；规范化成功后再检查创建额度。`timeout=30` 不是 gthread 单请求正文读取的硬性截止时间，部署时仍需在入口代理确认正文读取截止与缓冲。
 
 程序默认 Origin 只允许 `https://qingke.local`；本次部署环境文件精确允许 `https://qingke.local` 和用户的 `https://qk.sagiri.org`。环境变量可精确追加使用中的网页预览源，禁止 `*` 或 null。无 Origin 的原生/CLI 请求允许。来源校验只负责浏览器访问约束，持有 100 bit 口令才是读取凭证，Origin 不作为身份认证。无 cookie 会话，不返回 Access-Control-Allow-Credentials。
 
