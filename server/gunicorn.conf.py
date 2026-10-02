@@ -9,7 +9,8 @@ keepalive = 2
 max_requests = 10000
 max_requests_jitter = 500
 limit_request_line = 2048
-limit_request_fields = 20
+# Allow normal browser headers plus the headers added by HTTPS proxies/CDNs.
+limit_request_fields = 64
 limit_request_field_size = 4096
 forwarded_allow_ips = ''
 # URLs contain capability secrets. Never enable an access log here or in nginx.

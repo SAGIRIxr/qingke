@@ -135,6 +135,8 @@ curl --fail http://127.0.0.1:8787/healthz
 
 当前 `QINGKE_TRUST_PROXY=false`，Lucky 的覆盖行为经实际请求验证后才能启用；应用因此不会信任伪造的 X-Real-IP。未启用前，所有经 Lucky 的请求共用 loopback 的限速额度，这能保护服务，但多人同时使用可能较早触发限速；不要仅为绕过限速启用未验证的代理头。确认覆盖后编辑环境变量并重启 qingke-share 即可，不需要改变应用数据。
 
+Gunicorn 最多接受 64 个请求头，单个字段上限 4096 字节、请求行上限 2048 字节。浏览器与 CDN／反代会叠加请求头，过低的数量限制会在应用校验之前误报 HTTP 431；修改部署配置后应验证正常浏览器访问和超限拒绝。
+
 Debian 12 自带 Gunicorn 20.1 在核对时仍有已知 HTTP 协议解析问题，因此固定使用官方 PyPI wheel 并校验 SHA-256，不替换系统 Python。后续升级应先核对安全公告、更新固定版本与哈希，再重跑接口测试。
 
 参考：[Python sqlite3 参数占位符](https://docs.python.org/3/library/sqlite3.html)、[Python HTTP 服务的生产限制](https://docs.python.org/3/library/http.server.html)、[OWASP REST Security](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)、[Debian Gunicorn 安全追踪](https://security-tracker.debian.org/tracker/source-package/gunicorn)、[Gunicorn 官方 PyPI](https://pypi.org/project/gunicorn/)。
