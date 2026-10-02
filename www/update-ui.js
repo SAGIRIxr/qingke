@@ -19,7 +19,7 @@ export function updateProxy(config){
 const size=value=>Number.isFinite(Number(value))?`${(Number(value)/1048576).toFixed(1)} MB`:'大小待确认';
 
 export function createUpdateUI({onMessage}={}){
-  let state={phase:'idle',busy:false,currentVersion:'3.2.0',ready:false},configError='';
+  let state={phase:'idle',busy:false,currentVersion:'3.2.1',ready:false},configError='';
   const supported=()=>!!window.Android?.checkForUpdate;
   const notify=message=>(onMessage||toast)(message);
   function refresh(){if(window.Android?.getUpdateStatus)try{state={...state,...JSON.parse(Android.getUpdateStatus())};}catch{state={...state,phase:'error',message:'无法读取更新状态，请重新打开应用'};}}
@@ -31,7 +31,7 @@ export function createUpdateUI({onMessage}={}){
   function updateVisible(){const node=document.querySelector('#app-update-status');if(node)node.innerHTML=statusMarkup();}
   function open(){
     refresh();let config;try{config=settings();configError='';}catch(e){config={mode:'default',customProxy:''};configError=e.message;}
-    sheet('应用更新',`<p class="sheet-subtitle">当前版本 ${esc(state.currentVersion||'3.2.0')} · 官方来源 SAGIRIxr/qingke</p><div id="app-update-status" aria-live="polite">${statusMarkup()}</div><div class="divider">下载连接</div><form id="app-update-settings">${field('连接方式',select('mode',FORMATS,config.mode))}${field('自定义代理根地址',input('customProxy',config.customProxy,'url','maxlength="500" placeholder="https://代理域名/"'),'自定义模式使用此地址作为 GitHub 下载链接前缀。')}${configError?`<p class="helper-box warning-box">${esc(configError)}</p>`:''}<p class="source-note">默认使用第三方 GHFast 代理，可切换直连或自己的代理。更新仍来自固定项目，安装前校验文件摘要与当前应用签名。</p>${submit('保存连接方式')}</form>`);
+    sheet('应用更新',`<p class="sheet-subtitle">当前版本 ${esc(state.currentVersion||'3.2.1')} · 官方来源 SAGIRIxr/qingke</p><div id="app-update-status" aria-live="polite">${statusMarkup()}</div><div class="divider">下载连接</div><form id="app-update-settings">${field('连接方式',select('mode',FORMATS,config.mode))}${field('自定义代理根地址',input('customProxy',config.customProxy,'url','maxlength="500" placeholder="https://代理域名/"'),'自定义模式使用此地址作为 GitHub 下载链接前缀。')}${configError?`<p class="helper-box warning-box">${esc(configError)}</p>`:''}<p class="source-note">默认使用第三方 GHFast 代理，可切换直连或自己的代理。更新仍来自固定项目，安装前校验文件摘要与当前应用签名。</p>${submit('保存连接方式')}</form>`);
   }
   window.onAppUpdateEvent=event=>{
     if(!event||typeof event!=='object')return;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeSemester, occurrencesOn } from '../www/engine.js';
-import { adjustmentDates, planDayAdjustment, courseOccurrences, planSingleChange } from '../www/calendar-ui.js';
+import { adjustmentDates, planDayAdjustment, sourceTeachingWeeks, courseOccurrences, planSingleChange } from '../www/calendar-ui.js';
 
 function fixture() {
   const s = makeSemester({ name: '日历交互验证', startDate: '2026-09-07', totalWeeks: 16 });
@@ -32,6 +32,62 @@ test('星期补课保留明确来源周的单双周语义，源日不再重复',
   assert.equal(occurrencesOn(plan.semester, '2026-09-20')[0].sourceDate, '2026-09-07');
   const even = planDayAdjustment(fixture(), { dateMode: 'single', date: '2026-09-20', type: 'replace', sourceMode: 'weekday', sourceWeekday: 1, sourceWeekMode: 'target' });
   assert.equal(even.rules[0].sourceDate, '2026-09-14'); assert.equal(occurrencesOn(even.semester, '2026-09-20').length, 0);
+});
+
+const weekdaySource = (mode, week, extra = {}) => ({ dateMode: 'single', date: '2026-09-20', type: 'replace', sourceMode: 'weekday', sourceWeekday: 1, sourceWeekMode: mode, sourceWeek: week, ...extra });
+
+test('来源教学周单周和双周分别读取指定周的课程，保存精确日期且不改原课表', () => {
+  const s = fixture();
+  s.courses.push({ ...structuredClone(s.courses[0]), id: 'even', name: '双周课程', sessions: [{ ...structuredClone(s.courses[0].sessions[0]), id: 'even-mon', weeks: [2, 4, 6] }] });
+  const before = structuredClone(s);
+  const odd = planDayAdjustment(s, weekdaySource('odd', 3));
+  assert.equal(odd.rules[0].sourceDate, '2026-09-21');
+  assert.deepEqual(occurrencesOn(odd.semester, '2026-09-20').map(o => o.name), ['高等数学']);
+  assert.equal(occurrencesOn(odd.semester, '2026-09-21').length, 0);
+  assert.equal(occurrencesOn(odd.semester, '2026-09-07').length, 1);
+  const even = planDayAdjustment(s, weekdaySource('even', 2));
+  assert.equal(even.rules[0].sourceDate, '2026-09-14');
+  assert.deepEqual(occurrencesOn(even.semester, '2026-09-20').map(o => o.name), ['双周课程']);
+  assert.equal(occurrencesOn(even.semester, '2026-09-14').length, 0);
+  assert.deepEqual(s, before);
+});
+
+test('单双周必须明确指定来源周，拒绝不匹配和未知模式，不自动挪到邻周', () => {
+  const s = fixture();
+  for (const mode of ['odd', 'even']) for (const week of ['', undefined, null]) assert.throws(() => planDayAdjustment(s, weekdaySource(mode, week)), /具体的来源教学周/);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('odd', 2)), /请选择单周/);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('even', 3)), /请选择双周/);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('nearest', 3)), /来源教学周方式/);
+  for (const week of [0, 17, 1.5, 'invalid']) assert.throws(() => planDayAdjustment(s, weekdaySource('odd', week)), /来源教学周/);
+});
+
+test('来源单双周候选按学期周次跨年计算，包含末周并处理没有双周的学期', () => {
+  const s = makeSemester({ name: '跨年', startDate: '2026-12-28', totalWeeks: 5 });
+  assert.deepEqual(sourceTeachingWeeks(s, 1, 'odd').map(({ week, date }) => [week, date]), [[1, '2026-12-28'], [3, '2027-01-11'], [5, '2027-01-25']]);
+  assert.deepEqual(sourceTeachingWeeks(s, 1, 'even').map(({ week, date }) => [week, date]), [[2, '2027-01-04'], [4, '2027-01-18']]);
+  assert.equal(sourceTeachingWeeks(s, 7, 'odd').at(-1).date, '2027-01-31');
+  s.totalWeeks = 1;
+  assert.deepEqual(sourceTeachingWeeks(s, 1, 'even'), []);
+  assert.throws(() => sourceTeachingWeeks(s, 1, 'unknown'), /方式无效/);
+  assert.throws(() => sourceTeachingWeeks(s, 8, 'odd'), /补课星期/);
+});
+
+test('非周一开学的来源候选排除开学前日期，提交也不能绕过', () => {
+  const s = makeSemester({ name: '周三开学', startDate: '2026-09-09', totalWeeks: 5 });
+  assert.deepEqual(sourceTeachingWeeks(s, 1, 'odd').map(x => x.week), [3, 5]);
+  assert.deepEqual(sourceTeachingWeeks(s, 3, 'odd').map(x => x.week), [1, 3, 5]);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('odd', 1)), /早于实际开学日/);
+  assert.equal(planDayAdjustment(s, weekdaySource('odd', 1, { sourceWeekday: 3 })).rules[0].sourceDate, '2026-09-09');
+});
+
+test('单双周来源继续拒绝多目标复用、已用来源、同日及连锁补课', () => {
+  const s = fixture(), before = structuredClone(s);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('odd', 1, { dateMode: 'multiple' }), ['2026-09-19', '2026-09-20']), /补课来源日期/);
+  assert.throws(() => planDayAdjustment(s, weekdaySource('odd', 1, { date: '2026-09-07' })), /不能与原日期相同/);
+  const first = planDayAdjustment(s, weekdaySource('odd', 1)).semester;
+  assert.throws(() => planDayAdjustment(first, weekdaySource('odd', 1, { date: '2026-09-27' })), /补课来源日期/);
+  assert.throws(() => planDayAdjustment(first, weekdaySource('even', 2, { sourceWeekday: 7, date: '2026-09-27' })), /连锁|整日/);
+  assert.deepEqual(s, before);
 });
 
 test('多个补课目标按排序映射来源日，不静默覆盖或复用同一来源', () => {

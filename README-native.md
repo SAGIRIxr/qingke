@@ -175,7 +175,7 @@ Manifest 为 HTTPS `/s` 单独声明自动验证 App Link，为自定义协议�
 
 `debug` 构建开启 `WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)`，方便通过 USB / ADB 的 Chrome DevTools 检查页面。不要把调试版本当作正式发行包。
 
-`release` 构建的 `BuildConfig.DEBUG` 为 `false`，关闭 WebView 调试及网页控制台日志。3.1.0 的 `versionCode` 为 4。为直接覆盖现有 1.x–3.0 测试安装，正式构建继续使用**原安装证书对应的同一私钥**；证书主题仍为历史的 Android Debug，不代表 release 允许调试。没有生成另一把密钥或要求卸载迁移。Android 覆盖更新要求签名身份兼容，见 [官方签名说明](https://developer.android.com/studio/publish/app-signing)。
+`release` 构建的 `BuildConfig.DEBUG` 为 `false`，关闭 WebView 调试及网页控制台日志。3.2.1 的 `versionCode` 为 6。为直接覆盖现有 1.x–3.0 测试安装，正式构建继续使用**原安装证书对应的同一私钥**；证书主题仍为历史的 Android Debug，不代表 release 允许调试。没有生成另一把密钥或要求卸载迁移。Android 覆盖更新要求签名身份兼容，见 [官方签名说明](https://developer.android.com/studio/publish/app-signing)。
 
 公开证书 SHA-256：`3a7b3de62c96fbb3dd5f5eb26c02bfe88efa1de88b09175cf83a58fb3a2641b9`。本机已把原私钥导入工作区外的 PKCS#12 签名库，采用随机强口令；配置中的口令由 Windows DPAPI 绑定当前系统账号保护，目录仅当前账号与 SYSTEM 可访问，原 debug keystore 保持原样。私钥、签名库及口令不进入源码仓库或 Release 附件。
 
@@ -192,10 +192,10 @@ Gradle 通过 `QINGKE_STORE_FILE`、`QINGKE_STORE_PASSWORD`、`QINGKE_KEY_ALIAS`
   "format": "qingke-update",
   "version": 1,
   "packageName": "cn.qingke.app",
-  "versionCode": 4,
-  "versionName": "3.1.0",
-  "tag": "v3.1.0",
-  "asset": "qingke-3.1.0-release.apk",
+  "versionCode": 6,
+  "versionName": "3.2.1",
+  "tag": "v3.2.1",
+  "asset": "qingke-3.2.1-release.apk",
   "size": 12345678,
   "sha256": "填写实际文件的64位十六进制SHA256",
   "notes": "本次更新说明"

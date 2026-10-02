@@ -50,7 +50,7 @@ export function refreshCourseProgress(root,occurrences,now=Date.now()){
 
 const row=(action,i,title,description,trailing='')=>`<button class="setting-row" data-action="${action}"><span class="setting-icon">${icon(i)}</span><span class="row-text"><strong>${title}</strong><small>${description}</small></span>${trailing||icon('right',15)}</button>`;
 const group=(name,content)=>`<section class="settings-section"><h2>${name}</h2><div class="setting-group">${content}</div></section>`;
-export function renderSettingsPage(state,version='3.2.0'){
+export function renderSettingsPage(state,version='3.2.1'){
   const s=state.semesters.find(s=>s.id===state.activeSemesterId);
   return `<div class="section-heading"><h1>设置</h1></div>${group('课程与考试',row('import','school','导入课程','正方教务 / PDF / 文字')+row('all-courses','grid','管理课程',`${s.courses.length} 门课程 · 添加、编辑和删除`)+row('exams','note','考试安排',`${s.exams.length} 场 · 独立日期与考场`))}${group('学期与校历',row('semesters','calendar','学期管理',`${esc(s.name)} · 切换、编辑和删除`)+row('profiles','clock','上课作息',`${s.profiles.length} 套 · 夏冬切换与分时段联动`)+row('calendar','swap','调休与调课','勾选日期停补课 / 移动某一次课程'))}${group('提醒与显示',row('notifications','bell','提醒与课程状态',state.preferences.notifications.enabled?'课前提醒已开启 · 计时方式与权限':'提醒时间、课间提醒和通知权限')+row('toggle-weekend','grid','周视图显示周末','开启后显示周六和周日',`<span class="switch ${s.showWeekend?'on':''}" role="switch" aria-checked="${s.showWeekend}"></span>`))}${group('分享与数据',row('share-home','swap','分享与跟随','口令分享、导入朋友课表及同步状态')+row('backup-menu','download','备份与恢复','导出文件、恢复备份和历史版本'))}${group('应用',row('app-update','download','检查更新',`当前版本 ${version} · GitHub 更新与代理`))}<div class="about-mark"><img src="./icon.svg" alt="清课图标"><p>清课 ${version}</p></div>`;
 }

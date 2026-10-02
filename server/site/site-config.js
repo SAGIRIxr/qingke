@@ -1,6 +1,6 @@
 // The release version is maintained here; URL parameters never select downloads.
 export const RELEASE = Object.freeze({
-  version: '3.2.0',
+  version: '3.2.1',
   repository: 'https://github.com/SAGIRIxr/qingke',
   proxy: 'https://gh-proxy.com/',
 });

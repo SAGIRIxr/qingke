@@ -23,6 +23,33 @@ export function adjustmentDates(values, selected = []) {
   return dates;
 }
 
+/** Parity follows the semester's teaching weeks; every choice names a real date. */
+export function sourceTeachingWeeks(semester, sourceWeekday, mode = 'fixed') {
+  if (!['fixed', 'odd', 'even'].includes(mode)) throw Error('来源教学周方式无效');
+  const day = Number(sourceWeekday);
+  if (!Number.isInteger(day) || day < 1 || day > 7) throw Error('请选择有效的补课星期');
+  const weeks = [];
+  for (let week = 1; week <= semester.totalWeeks; week++) {
+    if (mode === 'odd' && week % 2 !== 1 || mode === 'even' && week % 2 !== 0) continue;
+    // The first teaching week may begin before the actual semester start.
+    if (week === 1 && day < weekday(semester.startDate)) continue;
+    const date = dateForWeekday(semester, semester.startDate, day, week);
+    weeks.push({ week, date, label: `第 ${week} 周（${week % 2 ? '单周' : '双周'}）· ${date} 星期${DAYS[day - 1]}` });
+  }
+  return weeks;
+}
+
+function sourceDateForAdjustment(semester, targetDate, values) {
+  const mode = values.sourceWeekMode;
+  if (!['target', 'fixed', 'odd', 'even'].includes(mode)) throw Error('请选择有效的来源教学周方式');
+  if (mode === 'target') return dateForWeekday(semester, targetDate, Number(values.sourceWeekday));
+  const week = Number(values.sourceWeek);
+  if (!String(values.sourceWeek ?? '').trim()) throw Error('请先选择具体的来源教学周');
+  const sourceDate = dateForWeekday(semester, targetDate, Number(values.sourceWeekday), week);
+  if (mode === 'odd' && week % 2 !== 1 || mode === 'even' && week % 2 !== 0) throw Error(`请选择${mode === 'odd' ? '单周' : '双周'}的来源教学周`);
+  return sourceDate;
+}
+
 /** Build a preview with the same source-week and duplicate rules as the engine. */
 export function planDayAdjustment(original, values, selected = []) {
   const dates = adjustmentDates(values, selected), next = clone(original);
@@ -32,7 +59,7 @@ export function planDayAdjustment(original, values, selected = []) {
     if (rule.type === 'replace') {
       if (!['weekday', 'date'].includes(values.sourceMode)) throw Error('请选择补课来源');
       rule.sourceDate = values.sourceMode === 'weekday'
-        ? dateForWeekday(original, date, Number(values.sourceWeekday), values.sourceWeekMode === 'fixed' ? Number(values.sourceWeek) : undefined)
+        ? sourceDateForAdjustment(original, date, values)
         : addDays(values.sourceDate, index);
     }
     return rule;
@@ -109,8 +136,8 @@ export function createCalendarUI(ctx) {
   }
 
   function openCalendar(date, fromCalendar = true) {
-    const initial = addDays(date || localDate(), 0), s = semester(), week = Math.max(1, Math.min(s.totalWeeks, getWeek(initial, s.startDate)));
-    sheet('日历与教学调整', `<form id="day-rule-form" class="calendar-v4" data-semester="${esc(s.id)}">${input('selectedDates', JSON.stringify(date ? [initial] : []), 'hidden')}${input('calendarMonth', initial.slice(0, 7), 'hidden')}${input('type', '', 'hidden')}${input('sourceMode', 'weekday', 'hidden')}${input('rangeAnchor', '', 'hidden')}<div class="calendar-intro"><span>01</span><p><strong>先选日期</strong><small>点选或跨月多选，接着选择停课 / 补课。</small></p>${button('single-change', `${icon('swap', 14)} 单次调课`, 'calendar-single-quick')}</div><div data-calendar-grid></div><div class="calendar-selection" data-calendar-selection aria-live="polite"></div><details class="calendar-date-options"><summary>按单日或连续范围选择</summary>${field('选择方式', select('dateMode', [['multiple', '月历多选'], ['single', '单个日期'], ['range', '连续日期范围']], 'multiple'))}<div data-date-mode="single" hidden>${field('日期', input('date', initial, 'date'))}</div><div data-date-mode="range" hidden><div class="form-row">${field('开始日期', input('rangeStart', initial, 'date'))}${field('结束日期', input('rangeEnd', initial, 'date'))}</div><p class="source-note">也可在月历依次点选范围起点、终点。</p></div></details><div class="calendar-intro"><span>02</span><p><strong>选择调整方式</strong><small>整日调整会影响所选日期的所有课程。</small></p></div><div class="calendar-operation-grid">${button('calendar-operation', `${icon('close', 18)}<strong>停课</strong><small>这些天不上课</small>`, 'calendar-operation', 'data-operation="off" aria-pressed="false"')}${button('calendar-operation', `${icon('swap', 18)}<strong>补星期几</strong><small>指定来源教学周</small>`, 'calendar-operation', 'data-operation="weekday" aria-pressed="false"')}${button('calendar-operation', `${icon('calendar', 18)}<strong>补某天的课</strong><small>指定来源日期</small>`, 'calendar-operation', 'data-operation="date" aria-pressed="false"')}</div><div data-adjust-fields hidden><div data-source-mode="weekday" hidden>${field('补星期几的课', select('sourceWeekday', DAYS.map((d, i) => [i + 1, `星期${d}`]), 1))}${field('来源教学周', select('sourceWeekMode', [['target', '分别采用各目标所在教学周'], ['fixed', '统一指定一个教学周']], 'target'))}<div data-fixed-week hidden>${field('第几周', input('sourceWeek', week, 'number', `min="1" max="${s.totalWeeks}" step="1"`))}</div><p class="source-note">按来源教学周保留单双周；同一个来源日期只能补一次。</p></div><div data-source-mode="date" hidden>${field('来源日期', input('sourceDate', initial, 'date'))}<p class="source-note">多个目标按日期排序，来源从此日期起逐天顺延。下一步会逐日列出对应关系。</p></div>${field('说明（选填）', input('label', '', 'text', 'maxlength="100" placeholder="例如 学校调休通知"'))}<p class="source-note">补课沿用来源周次和目标当天作息，原日期不重复上课；独立考试按其自身日期保留。</p>${submitButton('逐日预览调整')}</div><div class="calendar-shortcuts">${button('single-change', `${icon('swap', 18)}<span><strong>单次调课</strong><small>只调整某门课的一次安排</small></span>${icon('right', 15)}`, 'calendar-shortcut')}${button('day-detail', `${icon('clock', 17)} 查看所选当天`, 'text-button')}${button('holiday', '添加日期标记', 'text-button')}</div></form>${fromCalendar ? changesMarkup() : ''}<p class="source-note">节假日标记不会自动停课，教学安排以学校通知为准。</p>`);
+    const initial = addDays(date || localDate(), 0), s = semester();
+    sheet('日历与教学调整', `<form id="day-rule-form" class="calendar-v4" data-semester="${esc(s.id)}">${input('selectedDates', JSON.stringify(date ? [initial] : []), 'hidden')}${input('calendarMonth', initial.slice(0, 7), 'hidden')}${input('type', '', 'hidden')}${input('sourceMode', 'weekday', 'hidden')}${input('rangeAnchor', '', 'hidden')}<div class="calendar-intro"><span>01</span><p><strong>先选日期</strong><small>点选或跨月多选，接着选择停课 / 补课。</small></p>${button('single-change', `${icon('swap', 14)} 单次调课`, 'calendar-single-quick')}</div><div data-calendar-grid></div><div class="calendar-selection" data-calendar-selection aria-live="polite"></div><details class="calendar-date-options"><summary>按单日或连续范围选择</summary>${field('选择方式', select('dateMode', [['multiple', '月历多选'], ['single', '单个日期'], ['range', '连续日期范围']], 'multiple'))}<div data-date-mode="single" hidden>${field('日期', input('date', initial, 'date'))}</div><div data-date-mode="range" hidden><div class="form-row">${field('开始日期', input('rangeStart', initial, 'date'))}${field('结束日期', input('rangeEnd', initial, 'date'))}</div><p class="source-note">也可在月历依次点选范围起点、终点。</p></div></details><div class="calendar-intro"><span>02</span><p><strong>选择调整方式</strong><small>整日调整会影响所选日期的所有课程。</small></p></div><div class="calendar-operation-grid">${button('calendar-operation', `${icon('close', 18)}<strong>停课</strong><small>这些天不上课</small>`, 'calendar-operation', 'data-operation="off" aria-pressed="false"')}${button('calendar-operation', `${icon('swap', 18)}<strong>补星期几</strong><small>指定来源教学周</small>`, 'calendar-operation', 'data-operation="weekday" aria-pressed="false"')}${button('calendar-operation', `${icon('calendar', 18)}<strong>补某天的课</strong><small>指定来源日期</small>`, 'calendar-operation', 'data-operation="date" aria-pressed="false"')}</div><div data-adjust-fields hidden><div data-source-mode="weekday" hidden>${field('补星期几的课', select('sourceWeekday', DAYS.map((d, i) => [i + 1, `星期${d}`]), 1))}${field('来源教学周', select('sourceWeekMode', [['target', '分别采用各目标所在教学周'], ['odd', '单周'], ['even', '双周'], ['fixed', '指定教学周（全部）']], 'target'))}<div data-fixed-week hidden>${field('具体来源教学周', select('sourceWeek', [['', '请选择具体的来源教学周'], ...sourceTeachingWeeks(s, 1).map(choice => [choice.week, choice.label])], ''), '单双周按本学期的第几周计算；选择确切周次后再预览。')}</div><p class="source-note">课程按所选来源周次读取，原日期不再重复上课；同一个来源日期只能补一次。</p></div><div data-source-mode="date" hidden>${field('来源日期', input('sourceDate', initial, 'date'))}<p class="source-note">多个目标按日期排序，来源从此日期起逐天顺延。下一步会逐日列出对应关系。</p></div>${field('说明（选填）', input('label', '', 'text', 'maxlength="100" placeholder="例如 学校调休通知"'))}<p class="source-note">补课沿用来源周次和目标当天作息，原日期不重复上课；独立考试按其自身日期保留。</p>${submitButton('逐日预览调整')}</div><div class="calendar-shortcuts">${button('single-change', `${icon('swap', 18)}<span><strong>单次调课</strong><small>只调整某门课的一次安排</small></span>${icon('right', 15)}`, 'calendar-shortcut')}${button('day-detail', `${icon('clock', 17)} 查看所选当天`, 'text-button')}${button('holiday', '添加日期标记', 'text-button')}</div></form>${fromCalendar ? changesMarkup() : ''}<p class="source-note">节假日标记不会自动停课，教学安排以学校通知为准。</p>`);
     redrawCalendar();
   }
 
@@ -119,7 +146,10 @@ export function createCalendarUI(ctx) {
     for (const el of form.querySelectorAll('[data-date-mode]')) el.hidden = el.dataset.dateMode !== values.dateMode;
     form.querySelector('[data-adjust-fields]').hidden = !values.type;
     for (const el of form.querySelectorAll('[data-source-mode]')) el.hidden = values.type !== 'replace' || el.dataset.sourceMode !== values.sourceMode;
-    form.querySelector('[data-fixed-week]').hidden = values.sourceWeekMode !== 'fixed';
+    form.querySelector('[data-fixed-week]').hidden = values.sourceWeekMode === 'target';
+    const choices = sourceTeachingWeeks(semester(), values.sourceWeekday, values.sourceWeekMode === 'target' ? 'fixed' : values.sourceWeekMode);
+    const current = choices.some(choice => String(choice.week) === values.sourceWeek) ? values.sourceWeek : '';
+    form.elements.namedItem('sourceWeek').innerHTML = `<option value="">${choices.length ? '请选择具体的来源教学周' : '这个学期没有符合条件的来源教学周'}</option>${choices.map(choice => `<option value="${choice.week}" ${String(choice.week) === current ? 'selected' : ''}>${esc(choice.label)}</option>`).join('')}`;
     for (const el of form.querySelectorAll('[data-action="calendar-operation"]')) el.setAttribute('aria-pressed', String(el.dataset.operation === (values.type === 'off' ? 'off' : values.type ? values.sourceMode : '')));
   }
 
@@ -184,7 +214,7 @@ export function createCalendarUI(ctx) {
       const original = semester(), plan = planDayAdjustment(original, values, selected(form));
       const rows = plan.rules.map(rule => {
         const before = occurrencesOn(original, rule.date).filter(o => o.kind === 'course').length, after = occurrencesOn(plan.semester, rule.date), courses = after.filter(o => o.kind === 'course'), exams = after.filter(o => o.kind === 'exam');
-        const source = rule.type === 'replace' ? `${rule.sourceDate}（第 ${getWeek(rule.sourceDate, original.startDate)} 周·周${DAYS[weekday(rule.sourceDate) - 1]}） → ` : '';
+        const source = rule.type === 'replace' ? `${rule.sourceDate}（第 ${getWeek(rule.sourceDate, original.startDate)} 周·${getWeek(rule.sourceDate, original.startDate) % 2 ? '单周' : '双周'}·周${DAYS[weekday(rule.sourceDate) - 1]}） → ` : '';
         return `<div class="adjust-preview-row"><strong>${esc(source)}${rule.date}</strong><span>原 ${before} 次课程 → ${courses.length} 次${exams.length ? `；${exams.length} 场独立考试保留` : ''}</span>${courses.length ? `<small>${courses.map(o => esc(o.name)).join('、')}</small>` : ''}</div>`;
       }).join('');
       ctx.reviewSemester(plan.semester, '批量教学调整前', `<strong>确认${values.type === 'off' ? '停课' : '补课'} ${plan.rules.length} 天</strong><div class="adjust-preview-list">${rows}</div>保存后可在教学调整列表撤销。`, plan.dates);
@@ -200,7 +230,11 @@ export function createCalendarUI(ctx) {
   function change(target) {
     const form = target.closest('#day-rule-form');
     if (form) {
+      if (['sourceWeek', 'sourceWeekMode', 'sourceWeekday'].includes(target.name)) {
+        const error = form.querySelector('#form-error'); if (error) error.textContent = '';
+      }
       if (target.name === 'dateMode') setValue(form, 'rangeAnchor', '');
+      if (target.name === 'sourceWeekMode') setValue(form, 'sourceWeek', '');
       if (['date', 'rangeStart'].includes(target.name) && target.value) setValue(form, 'calendarMonth', addDays(target.value, 0).slice(0, 7));
       syncVisibility(form); redrawCalendar(form); return true;
     }

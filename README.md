@@ -2,11 +2,11 @@
 
 一款无广告、无需应用账号、在本机保存数据的 Android 课程表。支持自定义正方教务网址、文字型 PDF 导入、年度循环作息、批量调休调课、独立考试、系统提醒，以及可选择开启的口令分享与课表跟随。3.2 改进重叠课程展示，增加官网、可直接打开 App 的分享消息，以及打开 App 时在本机识别分享链接的入口。
 
-官网与下载：[qk.sagiri.org](https://qk.sagiri.org/) · 源码：[SAGIRIxr/qingke](https://github.com/SAGIRIxr/qingke) · 安装包：[GitHub Releases](https://github.com/SAGIRIxr/qingke/releases) · 本版发布页：[v3.2.0](https://github.com/SAGIRIxr/qingke/releases/tag/v3.2.0)。
+官网与下载：[qk.sagiri.org](https://qk.sagiri.org/) · 源码：[SAGIRIxr/qingke](https://github.com/SAGIRIxr/qingke) · 安装包：[GitHub Releases](https://github.com/SAGIRIxr/qingke/releases) · 本版发布页：[v3.2.1](https://github.com/SAGIRIxr/qingke/releases/tag/v3.2.1)。
 
 ## 安装与首次使用
 
-在官网选择 GH-Proxy 下载或 GitHub 官方下载，也可从发布页的 Assets 下载 `qingke-3.2.0-release.apk`，安装后打开手机桌面的「清课」。GH-Proxy 是可选的第三方下载代理。正式包关闭 WebView 调试，最低支持 Android 8.0，建议使用已更新的 Android System WebView。
+在官网选择 GH-Proxy 下载或 GitHub 官方下载，也可从发布页的 Assets 下载 `qingke-3.2.1-release.apk`，安装后打开手机桌面的「清课」。GH-Proxy 是可选的第三方下载代理。正式包关闭 WebView 调试，最低支持 Android 8.0，建议使用已更新的 Android System WebView。
 
 1. 到「设置」→「学期与校历」→「学期管理」，点学期旁的「编辑」，核对学年、学期、实际开学日期和总周数。开学可以是任意星期；教学周仍为周一至周日，首周开学前不排基础课程。默认日期用于初始化，不代表学校校历。
 2. 到「设置」→「学期与校历」→「上课作息」，按学校通知填写各小节起止时间及每年生效月日。
@@ -70,7 +70,7 @@
 | 单次移动／修改 | 更改这一次的日期、节次、地点、教师或备注 |
 | 撤销变更 | 移除指定规则，相关课程按剩余有效规则重新计算 |
 
-补课沿用**来源日期的周次和单双周**，实际上课时间采用**目标日期的作息**。来源可指定具体日期，也可指定星期以及来源教学周；多个目标选择连续来源日期时，来源按天顺延，预览中逐一列出。独立考试始终按考试本身的日期保留。
+补课沿用**来源日期的周次和单双周**，实际上课时间采用**目标日期的作息**。来源可指定具体日期，也可指定星期以及来源教学周。来源教学周支持选择单周或双周，再从对应候选中明确选择具体第几周；候选显示该星期的日期，确认前预览实际来源，不自动猜测来源周。多个目标选择连续来源日期时，来源按天顺延，预览中逐一列出。独立考试始终按考试本身的日期保留。
 
 同一天不能同时设置多条整日规则，同一来源日期不能重复补课；不支持把另一个补课目标再次作为来源的连锁规则。变更记录可在日历中查看和撤销。
 
@@ -197,7 +197,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps
 
 预览地址为 `http://127.0.0.1:4173`。网页预览支持课程编辑、本地 PDF／文本导入和备份下载；教务页面直接捕获与 Android 系统通知需要在 APK 中体验。桌面网页使用浏览器 fetch 测试分享时，服务必须明确允许对应 Origin；部署服务默认不开放任意本地预览来源。测试代理或原生桥接替身仅用于本地验证。
 
-Android 构建使用 Java 21、SDK 35、Gradle 8.11.1 和 AGP 8.7.3，详见 [README-native.md](README-native.md)。先配置自己的私有签名，脚本默认构建 Release，可传入 `-SdkPath`、`-GradlePath`，输出 `dist/qingke-3.2.0-release.apk`。首次下载构建依赖时去掉 `-Offline`；本地调试可显式使用 `-Configuration Debug`。签名私钥不随公开源码提供，自行构建的包不会继承官方签名。
+Android 构建使用 Java 21、SDK 35、Gradle 8.11.1 和 AGP 8.7.3，详见 [README-native.md](README-native.md)。先配置自己的私有签名，脚本默认构建 Release，可传入 `-SdkPath`、`-GradlePath`，输出 `dist/qingke-3.2.1-release.apk`。首次下载构建依赖时去掉 `-Offline`；本地调试可显式使用 `-Configuration Debug`。签名私钥不随公开源码提供，自行构建的包不会继承官方签名。
 
 正式包使用固定维护签名并关闭调试。当前不包含桌面小组件、图片 OCR 或应用退出后的云端实时推送。功能说明不代表每个设备和场景都已验收，具体完成项与未验证范围以 [TESTING.md](TESTING.md) 为准；自动化检查不能代替所有学校模板、系统通知策略和实际升级流程的验证。
 
