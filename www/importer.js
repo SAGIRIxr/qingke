@@ -1,8 +1,9 @@
 import { createCourse, parseWeeks } from './core.js';
+import { assessmentValuesFromText, isAssessmentMetadata } from './import-metadata.js';
 
 const DAY_NAMES = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
 const CHINESE_NUMBERS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
-const FIELD_END = '(?=\\s+(?:星期|周次|节次|教师|老师|教室|地点|任课教师|上课地点)\\s*[:：]|[\\n|｜;；]|$)';
+const FIELD_END = '(?=\\s*(?:课程名称|课程名|课程性质|课程类别|星期|周次|节次|教师|老师|教室|地点|任课教师|上课地点|考核方式|考核方法|考核形式|考核类别|考核类型|考核|备注)\\s*[:：]|[\\n|｜;；]|$)';
 
 function cleanText(value) {
   return String(value ?? '').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n').replace(/[\t ]+/g, ' ').trim();
@@ -72,6 +73,15 @@ function elementText(element) {
   return cleanText(pieces.join('')).replace(/\n(?:[ \t]*\n){2,}/g, '\n\n');
 }
 
+function siblingFieldText(node) {
+  const parts = [];
+  for (let sibling = node.nextSibling; sibling; sibling = sibling.nextSibling) {
+    if (sibling.nodeType === 1 && (sibling.tagName === 'BR' || sibling.matches('[title], [data-original-title], .tch-name, .teacher, .jsmc, .room, .classroom, .cdmc, .week, .weeks, .zcd, .period, .periods, .jcs, .khfs, .khfsmc'))) break;
+    parts.push(sibling.nodeType === 3 ? sibling.textContent : elementText(sibling));
+  }
+  return cleanText(parts.join(''));
+}
+
 function fieldFromElement(element, selectors, titlePattern) {
   for (const selector of selectors) {
     const found = element.querySelector(selector);
@@ -85,8 +95,7 @@ function fieldFromElement(element, selectors, titlePattern) {
         const value = title.replace(/^.*?[:：]\s*/, '');
         if (value !== title && cleanText(value)) return cleanText(value);
         const ownText = cleanText(node.textContent);
-        const container = node.closest('p') ?? node.parentElement;
-        const content = ownText && !titlePattern.test(ownText) ? ownText : cleanText(container?.textContent);
+        const content = ownText && !titlePattern.test(ownText) ? ownText : siblingFieldText(node);
         if (content) return content.replace(/^(?:任课教师|教师|老师|上课地点|教室|场地|周次|节次)\s*[:：]\s*/, '');
       }
     }
@@ -98,8 +107,33 @@ function nameFromText(text) {
   const labeled = labeledValue(text, '课程名称|课程名|课程');
   if (labeled) return labeled;
   const lines = text.split(/[\n|｜]/).map(cleanText).filter(Boolean);
-  return lines.find(line => !dayFromText(line) && !periodsFromText(line) && !/^(?:周次|节次|教师|老师|任课教师|教室|地点|上课地点|教学班|学分|考核|备注)\s*[:：]/.test(line) &&
+  return lines.find(line => !dayFromText(line) && !periodsFromText(line) && !isAssessmentMetadata(line) && !/^(?:周次|节次|教师|老师|任课教师|教室|地点|上课地点|教学班|学分|课程性质|课程类别|备注)\s*[:：]/.test(line) &&
     !/^\d[\d\s,，、—~-]*(?:周|\(周\)|（周）)/.test(line) && !/^(?:上午|下午|晚上|星期|时间|节次|课程表|学生课表)$/.test(line)) ?? '';
+}
+
+function assessmentsFromElement(block) {
+  const values = new Set();
+  const collect = raw => {
+    const text = cleanText(raw);
+    if (!text) return;
+    for (const value of assessmentValuesFromText(isAssessmentMetadata(text) ? text : `考核方式：${text}`)) values.add(value);
+  };
+  for (const node of block.querySelectorAll('.khfs, .khfsmc, .assessment, .assessment-method')) collect(elementText(node));
+  for (const node of block.querySelectorAll('[title], [data-original-title]')) {
+    const title = cleanText(node.getAttribute('data-original-title') || node.getAttribute('title'));
+    if (!/^(?:考核方式|考核方法|考核形式|考核类别|考核类型|考核)(?:\s*[:：]|$)/.test(title)) continue;
+    if (assessmentValuesFromText(title).length) collect(title);
+    else {
+      const own = elementText(node);
+      if (own && !/^(?:考核方式|考核方法|考核形式|考核类别|考核类型|考核)[\s:：]*$/.test(own)) collect(own);
+      else {
+        // A tooltip icon or visible label is followed by the field value. Stop
+        // before another annotated field instead of swallowing its whole row.
+        collect(siblingFieldText(node));
+      }
+    }
+  }
+  return [...values];
 }
 
 function fieldsFromBlock(block) {
@@ -109,6 +143,7 @@ function fieldsFromBlock(block) {
     location: fieldFromElement(block, ['.room', '.classroom', '.cdmc'], /上课地点|教室|场地/),
     weeks: fieldFromElement(block, ['.week', '.weeks', '.zcd'], /周次/),
     periods: fieldFromElement(block, ['.period', '.periods', '.jcs'], /节次|节\/周/),
+    assessments: assessmentsFromElement(block),
   };
   if (fields.weeks && periodsFromText(fields.weeks)) {
     fields.periods ||= fields.weeks;
@@ -132,10 +167,17 @@ function parseBlock(text, context, totalWeeks, fields = {}) {
   if (!weeks.length) missing.push('周次');
   if (missing.length) return { warning: `${name ? `“${name.slice(0, 35)}”` : '一条课程'}缺少可识别的${missing.join('、')}，已跳过，请手动补充。` };
   const positional = source.split(/[|｜\t]/).map(cleanText);
-  const teacher = fields.teacher || labeledValue(source, '任课教师|教师|老师') || (positional.length >= 6 ? positional[4] : '');
-  const location = fields.location || labeledValue(source, '上课地点|教室|地点') || (positional.length >= 6 ? positional[5] : '');
+  const teacher = fields.teacher || labeledValue(source, '任课教师|教师|老师') || (!fields.columnLayout && positional.length >= 6 ? positional[4] : '');
+  const location = fields.location || labeledValue(source, '上课地点|教室|地点') || (!fields.columnLayout && positional.length >= 6 ? positional[5] : '');
+  // Do not interpret a course name or a teacher/room called “考试” as metadata.
+  const metadataText = source.replace(new RegExp(`(?:课程名称|课程名|课程)\\s*[:：]\\s*.*?${FIELD_END}`, 'g'), '')
+    .split(/[\n|｜]/).map(cleanText).filter(part => ![name, teacher, location].includes(part)).join('\n');
+  const assessments = [...new Set([...(fields.assessments ?? []), ...assessmentValuesFromText(metadataText)])];
+  const assessment = assessments.length === 1 ? assessments[0] : '未设置';
   try {
-    return { course: createCourse({ name, teacher, location, day, startPeriod: periods[0], endPeriod: periods[1], weeks, note: '' }) };
+    const course = createCourse({ name, teacher, location, day, startPeriod: periods[0], endPeriod: periods[1], weeks, assessment, note: '' });
+    if (assessments.length > 1) course.assessmentConflict = true;
+    return { course, warning: assessments.length > 1 ? `“${name.slice(0, 35)}”的考核方式存在冲突，已保留为未设置，请在预览中核对。` : undefined };
   } catch (error) {
     return { warning: `“${name.slice(0, 35)}”格式无效：${error.message}` };
   }
@@ -189,6 +231,18 @@ function parseHtml(html, totalWeeks, add, warnings) {
         column += colSpan;
       }
     }
+    // Some Zhengfang pages expose an explicit course-list table rather than a
+    // weekday grid. Respect its column labels, including custom assessments.
+    const courseHeader = grid.findIndex(row => row?.some(entry => /^(?:课程名称|课程名)$/.test(entry?.text)) && row.some(entry => /^(?:星期|上课星期)$/.test(entry?.text)));
+    if (courseHeader >= 0) {
+      const headings = grid[courseHeader].map(entry => entry?.text ?? '');
+      for (let r = courseHeader + 1; r < grid.length; r++) {
+        const cells = grid[r]?.map(entry => entry?.text ?? '') ?? [];
+        if (!cells.some(Boolean)) continue;
+        parseText(`${headings.join(' | ')}\n${cells.join(' | ')}`, totalWeeks, add);
+      }
+      continue;
+    }
     const dayColumns = new Map();
     let headerRow = -1;
     for (let r = 0; r < Math.min(grid.length, 8); r++) {
@@ -235,9 +289,28 @@ function parseHtml(html, totalWeeks, add, warnings) {
 function parseText(text, totalWeeks, add) {
   const normalized = cleanText(text);
   const lines = normalized.split('\n').map(cleanText).filter(Boolean);
-  const lineCourses = lines.filter(line => /[|｜]/.test(line) && dayFromText(line));
+  const header = lines.find(line => /[|｜]/.test(line) && /课程名称|课程名/.test(line) && /(?:星期|周次|节次)/.test(line));
+  const columns = header?.split(/[|｜]/).map(cleanText);
+  const columnIndex = pattern => columns?.findIndex(column => pattern.test(column)) ?? -1;
+  const assessmentColumn = columnIndex(/^(?:考核方式|考核方法|考核形式|考核类别|考核类型|考核)$/);
+  const dayColumn = columnIndex(/^(?:星期|上课星期)$/);
+  const lineCourses = lines.filter(line => line !== header && /[|｜]/.test(line) && (dayFromText(line) || (dayColumn >= 0 && dayFromText(`星期${line.split(/[|｜]/)[dayColumn] ?? ''}`))));
   if (lineCourses.length) {
-    for (const line of lineCourses) add(parseBlock(line, {}, totalWeeks));
+    for (const line of lineCourses) {
+      const fields = {};
+      if (columns) {
+        fields.columnLayout = true;
+        const cells = line.split(/[|｜]/).map(cleanText);
+        for (const [field, pattern] of Object.entries({name:/^(?:课程名称|课程名|课程)$/,teacher:/^(?:任课教师|教师|老师)$/,location:/^(?:上课地点|教室|地点|场地)$/,weeks:/^(?:上课周次|周次)$/,periods:/^(?:上课节次|节次)$/})) {
+          const index = columnIndex(pattern);
+          if (index >= 0) fields[field] = cells[index] ?? '';
+        }
+        if (dayColumn >= 0) fields.day = dayFromText(`星期${cells[dayColumn] ?? ''}`);
+        if (assessmentColumn >= 0) fields.assessments = assessmentValuesFromText(`考核方式：${cells[assessmentColumn] ?? ''}`);
+        if (fields.periods && !/节/.test(fields.periods)) fields.periods += '节';
+      }
+      add(parseBlock(line, {}, totalWeeks, fields));
+    }
     return;
   }
   const blocks = normalized.split(/\n\s*\n|\n(?=\s*(?:课程名称|课程名|课程)\s*[:：])/).filter(cleanText);
@@ -248,7 +321,7 @@ function parseText(text, totalWeeks, add) {
 export function parseSchedule(input, totalWeeks = 20) {
   const courses = [];
   const warnings = [];
-  const fingerprints = new Set();
+  const fingerprints = new Map();
   const data = typeof input === 'string' ? { text: input } : input;
   if (!data || typeof data !== 'object') return { courses, warnings: ['没有可导入的课程内容。'], source: '未知来源' };
   let source = cleanText(data.title).slice(0, 100);
@@ -258,11 +331,22 @@ export function parseSchedule(input, totalWeeks = 20) {
   source ||= data.html ? '教务网页' : '粘贴文本';
   if (!Number.isInteger(totalWeeks) || totalWeeks < 1 || totalWeeks > 30) return { courses, warnings: ['学期周数应为 1—30。'], source };
   const add = result => {
-    if (result.warning) { if (warnings.length < 80) warnings.push(result.warning); return; }
+    if (result.warning && warnings.length < 80) warnings.push(result.warning);
     if (!result.course) return;
     const course = result.course;
     const fingerprint = JSON.stringify([course.name, course.teacher, course.location, course.day, course.startPeriod, course.endPeriod, course.weeks]);
-    if (!fingerprints.has(fingerprint) && courses.length < 500) { fingerprints.add(fingerprint); courses.push(course); }
+    const existing = fingerprints.get(fingerprint);
+    const assessment = course.assessment && course.assessment !== '未设置' ? course.assessment : '';
+    if (!existing && courses.length < 500) {
+      fingerprints.set(fingerprint, { course, assessments: new Set(assessment ? [assessment] : []), conflict: course.assessmentConflict === true });
+      courses.push(course);
+    } else if (existing) {
+      if (assessment) existing.assessments.add(assessment);
+      existing.conflict ||= course.assessmentConflict === true || existing.assessments.size > 1;
+      existing.course.assessment = existing.conflict ? '未设置' : [...existing.assessments][0] || '未设置';
+      if (existing.conflict) existing.course.assessmentConflict = true;
+      if (existing.conflict && warnings.length < 80) warnings.push(`“${course.name.slice(0, 35)}”的重复记录包含冲突的考核方式，已保留为未设置，请在预览中核对。`);
+    }
   };
   const text = cleanText(typeof data.text === 'string' ? data.text.replace(/\t/g, ' | ') : data.text);
   if (text.length > 2_000_000 || String(data.html ?? '').length > 2_000_000) return { courses, warnings: ['导入内容超过 2 MB，请只导入课程表页面。'], source };
@@ -274,6 +358,7 @@ export function parseSchedule(input, totalWeeks = 20) {
       for (const entry of entries.slice(0, 500)) {
         try {
           const course = createCourse(entry);
+          if (entry.assessmentConflict === true) { course.assessment = '未设置'; course.assessmentConflict = true; }
           if (course.weeks.some(week => week > totalWeeks)) throw new Error('课程周次超出当前学期范围');
           add({ course });
         } catch (error) { add({ warning: `一条 JSON 课程已跳过：${error.message}` }); }

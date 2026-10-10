@@ -42,3 +42,54 @@ test('文件与页数上限、无效类型在加载PDF库前拒绝',async()=>{
   assert.match((await parsePdf(new TextEncoder().encode('not a PDF'))).warnings[0],/有效/);
   assert.match(parsePdfTextPages(Array.from({length:31},()=>({items:[]}))).warnings[0],/30/);
 });
+
+test('PDF考核方式和裸考试课属于元数据，同一格多课仍分别关联',()=>{
+  const p=page([{day:1,y:105,lines:[
+    '高等数学','考核方式：考试','第1-2节 1-16周(单)','教师：王老师','教室：A201',
+    '大学英语','考查课','第1-2节 2-16周(双)','教师：李老师','教室：B302',
+  ]}]);
+  const result=parsePdfTextPages([p]);
+  assert.equal(result.courses.length,2);assert.deepEqual(result.warnings,[]);
+  assert.equal(result.courses.find(course=>course.name==='高等数学').assessment,'考试');
+  assert.equal(result.courses.find(course=>course.name==='大学英语').assessment,'考查');
+});
+
+test('PDF逐字空格和跨行考核标签、跨行考核值不会成为课程名称',()=>{
+  const p=page([{day:1,y:105,lines:[
+    '英语口语','考 核 方','式 ： 考','查','第1-2节 1-16周(单)','教师：王老师',
+    '工程制图','考核方式','考试课','第1-2节 2-16周(双)','教师：李老师',
+  ]}]);
+  const result=parsePdfTextPages([p]);
+  assert.equal(result.courses.length,2);assert.deepEqual(result.warnings,[]);
+  assert.equal(result.courses.find(course=>course.name==='英语口语').assessment,'考查');
+  assert.equal(result.courses.find(course=>course.name==='工程制图').assessment,'考试');
+});
+
+test('PDF跨页重复可以补充明确考核方式，冲突提示且后续重复不能静默覆盖',()=>{
+  const course=assessment=>page([{day:1,y:105,lines:['高等数学','第1-2节 1-16周',...(assessment?[`考核方式：${assessment}`]:[])]}]);
+  for(const pages of [[course(''),course('考试')],[course('考试'),course('')]]){
+    const result=parsePdfTextPages(pages);assert.equal(result.courses.length,1);
+    assert.equal(result.courses[0].assessment,'考试');assert.deepEqual(result.warnings,[]);
+  }
+  const result=parsePdfTextPages([course('考试'),course('考查'),course('考试')]);
+  assert.equal(result.courses.length,1);assert.equal(result.courses[0].assessment,'未设置');
+  assert.equal(result.courses[0].assessmentConflict,true);
+  assert.ok(result.warnings.some(w=>w.includes('考核方式不一致')));
+});
+
+test('PDF单个区块的考核冲突传递到跨页去重，后续明确值不能抹去冲突',()=>{
+  const conflict=page([{day:1,y:105,lines:['高等数学','第1-2节 1-16周','考核方式：考试','考核方式：考查']}]);
+  const explicit=page([{day:1,y:105,lines:['高等数学','第1-2节 1-16周','考核方式：考试']}]);
+  for(const pages of [[conflict,explicit],[explicit,conflict]]){
+    const result=parsePdfTextPages(pages);assert.equal(result.courses.length,1);
+    assert.equal(result.courses[0].assessment,'未设置');assert.equal(result.courses[0].assessmentConflict,true);
+    assert.ok(result.warnings.some(w=>w.includes('考核')));
+  }
+});
+
+test('PDF仅保留明确自定义考核值，不从课程名或必修推断考核',()=>{
+  const p=page([{day:1,y:105,lines:['软件实训','第1-2节 1-16周','考核方式：课程论文']},{day:3,y:105,lines:['考试心理学','第3-4节 1-16周','课程性质：必修']}]);
+  const result=parsePdfTextPages([p]);assert.equal(result.courses.length,2);
+  assert.equal(result.courses.find(course=>course.name==='软件实训').assessment,'课程论文');
+  assert.equal(result.courses.find(course=>course.name==='考试心理学').assessment,'未设置');
+});

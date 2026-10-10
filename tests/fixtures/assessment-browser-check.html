@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>考核方式网页导入验证（合成数据）</title></head><body><pre id="result">RUNNING</pre>
+<script type="module">
+import { parseSchedule } from '../../www/importer.js';
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+try {
+  const html = await (await fetch('./zhengfang-assessment.html')).text();
+  const parsed = parseSchedule({ html });
+  const expected = {'线性代数':'考试','艺术实践':'考查','专题设计':'作品答辩','英语考试方法研究':'未设置','基础物理':'考试','工程材料':'未设置','城市设计':'考查','交互设计':'论文与演示'};
+  assert(parsed.courses.length === 8, `应有8门课程：${JSON.stringify(parsed)}`);
+  for (const [name, assessment] of Object.entries(expected)) assert(parsed.courses.find(course => course.name === name)?.assessment === assessment, `${name}考核方式错误`);
+  const city = parsed.courses.find(course => course.name === '城市设计');
+  assert(city.teacher === '钱老师' && city.location === 'A301', '同一行多个tooltip字段相互污染');
+  const interaction = parsed.courses.find(course => course.name === '交互设计');
+  assert(interaction.teacher === '沈老师' && interaction.location === '设计楼301', '明细表字段未按表头映射');
+  assert(parsed.courses.find(course => course.name === '工程材料').assessmentConflict === true, '考核冲突标记丢失');
+  assert(parsed.warnings.length === 1 && parsed.warnings[0].includes('工程材料') && parsed.warnings[0].includes('冲突'), '冲突提示错误');
+  document.body.dataset.result = 'PASS';
+  document.querySelector('#result').textContent = JSON.stringify({courses:parsed.courses.map(({name,assessment})=>({name,assessment})),warnings:parsed.warnings});
+} catch (error) {
+  document.body.dataset.result = 'FAIL';
+  document.querySelector('#result').textContent = error.stack;
+}
+</script></body></html>

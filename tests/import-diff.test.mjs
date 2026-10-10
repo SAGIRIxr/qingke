@@ -128,3 +128,166 @@ test('文字网页与坐标PDF表达不同周次格式，完整解析链仍识�
   const semester=empty(),stored=applyImport(semester,diffImport(semester,web.courses,{kind:'web'}));
   const diff=diffImport(stored,pdf.courses,options);assert.equal(diff.counts.same,1);assert.equal(diff.counts.new,0);
 });
+
+test('旧版快照没有考核字段，重新导入须勾选才补全且快照结构不变',()=>{
+  const semester=imported(),before=structuredClone(semester),session=semester.courses[0].sessions[0];
+  assert.equal(Object.hasOwn(session.importSource.snapshot,'assessment'),false);
+  const diff=diffImport(semester,[flat({assessment:'考查'})],options),item=diff.items[0];
+  assert.equal(item.status,'changed');assert.equal(item.before.assessment,'未设置');assert.equal(item.after.assessment,'考查');
+  assert.deepEqual(applyImport(semester,diff),before);assert.deepEqual(applyImport(semester,diff,[]),before);
+  const next=checked(applyImport(semester,diff,[item.key]));
+  assert.equal(next.courses[0].assessment,'考查');assert.equal(next.courses[0].id,semester.courses[0].id);
+  assert.equal(next.courses[0].sessions[0].id,session.id);
+  assert.deepEqual(Object.keys(next.courses[0].sessions[0].importSource.snapshot).sort(),Object.keys(session.importSource.snapshot).sort());
+  assert.deepEqual(semester,before);
+  const repeat=diffImport(next,[flat({assessment:'考查'})],options);
+  assert.equal(repeat.counts.same,1);assert.equal(repeat.counts.changed,0);assert.deepEqual(applyImport(next,repeat),next);
+});
+
+test('网页与PDF跨来源补齐考核，手动名称地点和单次调课保留',()=>{
+  const semester=empty(),stored=applyImport(semester,diffImport(semester,[flat({name:'高等数学*',location:'市中校区 A201'})],{kind:'web',source:'jwgl.example.edu'}));
+  const course=stored.courses[0],session=course.sessions[0];
+  course.name='我的高数';session.location='手动教室';
+  stored.exceptions=[{id:'move-one',sessionId:session.id,sourceDate:'2026-09-07',type:'move',date:'2026-09-08',startPeriod:3,endPeriod:4,location:'调课教室'}];
+  const before=structuredClone(stored),diff=diffImport(stored,[flat({name:'高 等数学＊',assessment:'考试'})],options),item=diff.items[0];
+  assert.equal(item.status,'changed');assert.equal(item.after.name,'我的高数');assert.equal(item.after.location,'手动教室');
+  const next=checked(applyImport(stored,diff,[item.key]));
+  assert.equal(next.courses[0].assessment,'考试');assert.equal(next.courses[0].name,'我的高数');assert.equal(next.courses[0].sessions[0].location,'手动教室');
+  assert.equal(next.courses[0].sessions[0].id,session.id);assert.deepEqual(next.exceptions,stored.exceptions);assert.deepEqual(stored,before);
+});
+
+test('已有明确考核方式无论同安排或安排变化都保留，并展示来源和保留值',()=>{
+  const stored=imported();stored.courses[0].assessment='课程论文';
+  for(const change of [{},{location:'B301'}]){
+    const diff=diffImport(stored,[flat({...change,assessment:'考试'})],options),item=diff.items[0];
+    assert.equal(item.before.assessment,'课程论文');assert.equal(item.after.assessment,'课程论文');
+    assert.match(item.message,/课程论文/);assert.match(item.message,/考试/);assert.match(item.message,/保留/);
+    assert.ok(diff.warnings.some(warning=>warning.includes('课程论文')&&warning.includes('考试')));
+    assert.equal(checked(applyImport(stored,diff,[item.key])).courses[0].assessment,'课程论文');
+  }
+  const absent=diffImport(stored,[flat()],options);
+  assert.equal(absent.counts.same,1);assert.equal(absent.warnings.length,0);assert.deepEqual(applyImport(stored,absent),stored);
+});
+
+test('同安排重复条目一条缺考核一条有考核，输入顺序不影响明确元数据',()=>{
+  for(const assessments of [[undefined,'考查'],['考查',undefined],['未设置','考查','考查']]){
+    const semester=empty(),rows=assessments.map(assessment=>flat({assessment})),diff=diffImport(semester,rows,options);
+    assert.equal(diff.counts.new,1);assert.equal(diff.items[0].incoming.assessment,'考查');assert.equal(diff.items[0].after.assessment,'考查');
+    assert.equal(checked(applyImport(semester,diff)).courses[0].assessment,'考查');
+    const existing=imported(),update=diffImport(existing,rows,options);
+    assert.equal(update.counts.changed,1);assert.equal(checked(applyImport(existing,update,update.items.map(item=>item.key))).courses[0].assessment,'考查');
+  }
+});
+
+test('同安排互相冲突的考核聚合成警告，第三条重复值不能覆盖冲突',()=>{
+  for(const assessments of [['考试','考查','考试'],['考查','考试','考查'],[undefined,'考试','考查']]){
+    const semester=empty(),rows=assessments.map(assessment=>flat({assessment})),diff=diffImport(semester,rows,options);
+    assert.equal(diff.counts.new,1);assert.equal(diff.items[0].incoming.assessment,'未设置');assert.equal(diff.items[0].after.assessment,'未设置');
+    assert.ok(diff.warnings.some(warning=>/考核方式.*冲突/.test(warning)));
+    assert.equal(checked(applyImport(semester,diff)).courses[0].assessment,'未设置');
+    const existing=imported(),update=diffImport(existing,rows,options);
+    assert.equal(update.counts.same,1);assert.equal(update.counts.changed,0);
+    assert.deepEqual(applyImport(existing,update,update.items.map(item=>item.key)),existing);
+  }
+});
+
+function withTwoSessions(){
+  const stored=imported(),course=stored.courses[0],second=structuredClone(course.sessions[0]);
+  second.id='second-session';second.day=3;second.importSource.key=second.id;second.importSource.snapshot.day=3;course.sessions.push(second);
+  return stored;
+}
+
+test('同课程多安排的考核冲突不随输入顺序更新，其他教务变更仍可单独确认',()=>{
+  for(const reverse of [false,true]){
+    const stored=withTwoSessions(),rows=[flat({assessment:'考试',location:'B301'}),flat({day:3,assessment:'考查'})];
+    if(reverse)rows.reverse();
+    const diff=diffImport(stored,rows,options);
+    assert.equal(diff.counts.changed,1);assert.equal(diff.counts.same,1);
+    assert.ok(diff.warnings.some(warning=>warning.includes('考试')&&warning.includes('考查')&&warning.includes('冲突')));
+    assert.ok(diff.items.every(item=>item.after.assessment==='未设置'));
+    const next=checked(applyImport(stored,diff,diff.items.map(item=>item.key)));
+    assert.equal(next.courses[0].assessment,'未设置');assert.equal(next.courses[0].sessions[0].location,'B301');
+    assert.deepEqual(next.courses[0].sessions.map(session=>session.id),stored.courses[0].sessions.map(session=>session.id));
+  }
+});
+
+test('同课程多安排补齐考核，缺字段的兄弟安排不清空已确认结果或替用户授权',()=>{
+  for(const reverse of [false,true]){
+    const stored=withTwoSessions(),rows=[flat({assessment:'考试'}),flat({day:3,location:'B301'})];
+    stored.exceptions=[{id:'cancel-first',sessionId:stored.courses[0].sessions[0].id,sourceDate:'2026-09-07',type:'cancel'}];
+    if(reverse)rows.reverse();
+    const diff=diffImport(stored,rows,options),explicit=diff.items.find(item=>item.incoming.assessment==='考试'),missing=diff.items.find(item=>item.incoming.assessment==='未设置');
+    assert.equal(explicit.status,'changed');assert.equal(missing.status,'changed');
+    assert.equal(applyImport(stored,diff,[missing.key]).courses[0].assessment,'未设置');
+    const next=checked(applyImport(stored,diff,diff.items.map(item=>item.key)));
+    assert.equal(next.courses[0].assessment,'考试');assert.equal(next.courses[0].sessions[1].location,'B301');
+    assert.deepEqual(next.exceptions,stored.exceptions);assert.deepEqual(next.courses[0].sessions.map(session=>session.id),stored.courses[0].sessions.map(session=>session.id));
+  }
+});
+
+test('无来源的迁移课程也能凭唯一安排补齐，模糊匹配不补齐',()=>{
+  const stored=imported();delete stored.courses[0].assessment;delete stored.courses[0].sessions[0].importSource;
+  const diff=diffImport(stored,[flat({assessment:'考查'})],options);
+  assert.equal(diff.counts.changed,1);assert.equal(diff.items[0].before.assessment,'未设置');
+  assert.equal(checked(applyImport(stored,diff,[diff.items[0].key])).courses[0].assessment,'考查');
+  const unclear=diffImport(stored,[flat({day:3,assessment:'考查'})],options);
+  assert.equal(unclear.counts.ambiguous,1);assert.deepEqual(applyImport(stored,unclear,unclear.items.map(item=>item.key)),stored);
+});
+
+test('解析器消去的考核冲突阻止兄弟安排补齐，临时标记不会持久化',()=>{
+  const stored=withTwoSessions(),rows=[flat({assessment:'未设置',assessmentConflict:true}),flat({day:3,assessment:'考试',location:'B301'})];
+  const diff=diffImport(stored,rows,options);
+  assert.equal(diff.counts.same,1);assert.equal(diff.counts.changed,1);
+  const next=checked(applyImport(stored,diff,diff.items.map(item=>item.key)));
+  assert.equal(next.courses[0].assessment,'未设置');assert.equal(next.courses[0].sessions[1].location,'B301');
+  assert.equal(JSON.stringify(next).includes('assessmentConflict'),false);
+  const semester=empty(),initial=diffImport(semester,[flat({assessmentConflict:true}),flat({assessment:'考试'})],options);
+  const created=checked(applyImport(semester,initial));
+  assert.equal(initial.items[0].incoming.assessmentConflict,true);assert.equal(created.courses[0].assessment,'未设置');
+  assert.equal(JSON.stringify(created).includes('assessmentConflict'),false);
+});
+
+test('网页旧课到坐标PDF的完整链路补齐自定义考核且保留身份调课，再次导入幂等',()=>{
+  const web=parseSchedule({text:'高等数学* | 周一 | 第1-2节 | 1-4周 | 王老师 | 市中校区A201'});
+  const item=(text,x,y)=>({text,x,y,width:text.length*7,height:10});
+  const pdf=parsePdfTextPages([{width:800,height:500,items:[
+    ...['一','二','三','四','五'].map((day,i)=>item(`星期${day}`,100+i*130,50)),
+    ...['高 等 数 学','第1-2节 第1、2、3、4周','任课教师：王老师','上课地点：A201','考核方式：课程论文'].map((line,i)=>item(line,90,100+i*15))
+  ]}]);
+  assert.equal(web.courses.length,1);assert.equal(web.courses[0].assessment,'未设置');
+  assert.equal(pdf.courses.length,1,JSON.stringify(pdf.warnings));assert.equal(pdf.courses[0].assessment,'课程论文');
+  const semester=empty(),stored=applyImport(semester,diffImport(semester,web.courses,{kind:'web',source:web.source})),course=stored.courses[0],session=course.sessions[0];
+  course.name='自己命名的高数';session.location='手动教室';
+  stored.exceptions=[{id:'single-move',sessionId:session.id,sourceDate:'2026-09-07',type:'move',date:'2026-09-08',startPeriod:3,endPeriod:4,location:'调课教室'}];
+  const diff=diffImport(stored,pdf.courses,{kind:'pdf',source:pdf.source});
+  assert.equal(diff.counts.changed,1);assert.deepEqual(applyImport(stored,diff),stored);
+  const next=checked(applyImport(stored,diff,[diff.items[0].key]));
+  assert.equal(next.courses[0].assessment,'课程论文');assert.equal(next.courses[0].id,course.id);assert.equal(next.courses[0].sessions[0].id,session.id);
+  assert.equal(next.courses[0].name,course.name);assert.equal(next.courses[0].sessions[0].location,session.location);assert.deepEqual(next.exceptions,stored.exceptions);
+  const repeat=diffImport(next,pdf.courses,{kind:'pdf',source:pdf.source});
+  assert.equal(repeat.counts.same,1);assert.deepEqual(applyImport(next,repeat),next);
+});
+
+test('预览保留规范化重复的所有来源ID，补全及冲突后继续合并均不丢来源',()=>{
+  for(const assessments of [[undefined,'考查','考查'],['考试','考查',undefined],['考试','考查','考试']]){
+    const semester=empty(),rows=assessments.map((assessment,index)=>flat({id:`source-${index}`,name:index?'高 等数学*':'高等数学',assessment}));
+    const diff=diffImport(semester,rows,options);
+    assert.equal(diff.items.length,1);assert.deepEqual(diff.items[0].sourceIds,['source-0','source-1','source-2']);
+    assert.equal(diff.items[0].incoming.id,'source-0');
+    const corrected=rows.map(row=>({...row,assessment:'课程论文',assessmentConflict:false}));
+    const preview=diffImport(semester,corrected,options);
+    assert.deepEqual(preview.items[0].sourceIds,['source-0','source-1','source-2']);assert.equal(preview.items[0].incoming.assessment,'课程论文');
+    const stored=checked(applyImport(semester,preview));
+    assert.equal(stored.courses[0].assessment,'课程论文');assert.equal(JSON.stringify(stored).includes('sourceIds'),false);
+  }
+});
+
+test('相同、变化及模糊候选预览均带来源ID，缺失项无导入来源ID',()=>{
+  const stored=imported();
+  for(const [patch,status] of [[{},'same'],[{assessment:'考试'},'changed'],[{day:3},'ambiguous']]){
+    const diff=diffImport(stored,[flat({id:'incoming-row',...patch})],options),item=diff.items.find(row=>row.incoming);
+    assert.equal(item.status,status);assert.deepEqual(item.sourceIds,['incoming-row']);
+  }
+  const missing=diffImport(stored,[],options).items[0];
+  assert.equal(missing.status,'missing');assert.equal(Object.hasOwn(missing,'sourceIds'),false);
+});

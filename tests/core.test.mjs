@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_SETTINGS, createCourse, getWeek, getWeekDates, occursInWeek, findConflicts, parseWeeks, validateBackup, demoCourses } from '../www/core.js';
 
+test('课程校验保留明确考核方式，缺失不猜测，异常类型和超长值拒绝', () => {
+  for (const assessment of ['考试', '考查', '作品答辩']) assert.equal(createCourse(input({assessment})).assessment, assessment);
+  assert.equal(createCourse(input()).assessment, '未设置');
+  assert.equal(createCourse(input({assessment:'  '})).assessment, '未设置');
+  for (const assessment of [{}, ['考试'], '考'.repeat(31)]) assert.throws(() => createCourse(input({assessment})), /考核方式/);
+});
+
 const input = overrides => ({ name: '高等数学', teacher: '王老师', location: 'A201', day: 1, startPeriod: 1, endPeriod: 2, weeks: [1, 2, 3, 4], ...overrides });
 const backup = overrides => ({ version: 1, settings: structuredClone(DEFAULT_SETTINGS), courses: [createCourse(input())], ...overrides });
 

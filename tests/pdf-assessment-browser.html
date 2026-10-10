@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><link rel="icon" href="data:,"><title>Assessment PDF import QA</title>
+<pre id="result">Running…</pre>
+<script type="module">
+import {parsePdf} from '../www/pdf-import.js';
+const name='synthetic-assessment-timetable.pdf';
+const bytes=await (await fetch('./fixtures/pdf/'+name)).arrayBuffer();
+const result=await parsePdf(bytes,{name,totalWeeks:20});
+const byName=Object.fromEntries(result.courses.map(course=>[course.name,course]));
+const expected={'高等数学':'考试','实验设计':'未设置','英语口语':'考查','工程制图':'考试','软件实训':'课程论文','写作训练':'考查','考试心理学':'未设置'};
+const ok=result.courses.length===7&&Object.entries(expected).every(([name,assessment])=>byName[name]?.assessment===assessment)
+  &&byName['实验设计'].assessmentConflict===true
+  &&byName['英语口语'].weeks.join(',')==='2,4,6,8,10,12,14,16'
+  &&byName['工程制图'].weeks.join(',')==='1,3,5,7,9,11,13,15'
+  &&result.warnings.length===1&&result.warnings[0].includes('考核方式不一致');
+window.pdfAssessmentTestResults={ok,result};
+document.querySelector('#result').textContent=JSON.stringify(window.pdfAssessmentTestResults,null,2);
+document.title=ok?'PASS assessment PDF':'FAIL assessment PDF';
+</script>

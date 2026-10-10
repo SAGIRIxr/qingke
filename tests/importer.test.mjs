@@ -1,6 +1,117 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSchedule } from '../www/importer.js';
+import { assessmentFromText, assessmentValuesFromText, isAssessmentMetadata } from '../www/import-metadata.js';
+
+test('考核元数据只识别明确标签或完整字段，考试课/考查课统一名称', () => {
+  for (const [input, expected] of [
+    ['考核方式：考试', '考试'], ['考核方法: 考查课', '考查'], ['考试课', '考试'],
+    ['考 核 方 式：考 查', '考查'], ['考核方式\n考试', '考试'],
+    ['考核方法：作品答辩', '作品答辩'], ['考核形式：论文 + 展示', '论文 + 展示'],
+    ['考核方式：考试 教师：张老师', '考试'], ['考核方式：\n教师：张老师', ''],
+    ['未设置', ''], ['必修', ''], ['英语考试研究', ''], ['考试方法与实践', ''],
+    ['考试周安排', ''], ['课程性质：必修', ''],
+  ]) assert.equal(assessmentFromText(input), expected, input);
+  assert.deepEqual(assessmentValuesFromText('考核方式：考试；考核方法：考查'), ['考试', '考查']);
+  assert.equal(assessmentFromText('考核方式：考试；考核方法：考查'), '');
+});
+
+test('考核字段行含空标签不会作为课程名，课程名含考试不受影响', () => {
+  for (const input of ['考核方式', '考核方式：', '考核方式\n考查', '考 核 方 式：考 查', '考试课']) assert.equal(isAssessmentMetadata(input), true, input);
+  for (const input of ['英语考试研究', '考核方式研究', '考核方式：考试 教师：张老师']) assert.equal(isAssessmentMetadata(input), false, input);
+  const result = parseSchedule({text:'考核方式：考试\n专业英语\n周一 第1-2节 1-4周\n教师：老师\n地点：A101'});
+  assert.equal(result.courses[0].name, '专业英语');
+  assert.equal(result.courses[0].assessment, '考试');
+});
+
+test('空考核标签不吞入下一行的课程、教师、周次节次或时间', () => {
+  for (const following of ['第1-2节 第1-4周', '星期一', '08:00–09:40', '2026-10-12', '高等数学', '课程名称：高等数学', '教师：王老师', '教室：A201', '周次：1-4', '节次：1-2', '作品答辩']) {
+    for (const label of ['考核方式：', '考核方式']) {
+      const text = `${label}\n${following}`;
+      assert.equal(assessmentFromText(text), '', text);
+      assert.equal(isAssessmentMetadata(text), false, text);
+    }
+  }
+  const result = parseSchedule({text:'高等数学\n考核方式：\n第1-2节 第1-4周\n星期：周一\n教师：王老师\n教室：A201'});
+  assert.equal(result.courses.length, 1, JSON.stringify(result.warnings));
+  assert.equal(result.courses[0].assessment, '未设置');
+  assert.equal(result.courses[0].teacher, '王老师');
+  assert.equal(result.courses[0].location, 'A201');
+  assert.equal(assessmentFromText('考核方式：\n考 查 课'), '考查');
+  assert.equal(assessmentFromText('考核方式：作品答辩'), '作品答辩');
+});
+
+test('同一行标签导入考核方式，名称教师地点不会吞入考核文字', () => {
+  const result = parseSchedule({text:'课程名称：考试方法研究 考核方式：考查课 星期：一 节次：1-2 周次：1-4 教师：张老师 地点：A101'});
+  assert.equal(result.courses.length, 1, JSON.stringify(result.warnings));
+  assert.equal(result.courses[0].name, '考试方法研究');
+  assert.equal(result.courses[0].assessment, '考查');
+  assert.equal(result.courses[0].teacher, '张老师');
+  assert.equal(result.courses[0].location, 'A101');
+  const trailing = parseSchedule({text:'课程名称：设计\n星期：二\n节次：1-2\n周次：1-4\n教师：张老师 考核方式：作品答辩 地点：A102'});
+  assert.equal(trailing.courses[0].assessment, '作品答辩');
+  assert.equal(trailing.courses[0].teacher, '张老师');
+  assert.equal(trailing.courses[0].location, 'A102');
+});
+
+test('按表头导入任意位置的考核列及自定义考核文字', () => {
+  const result = parseSchedule({text:'课程名称 | 考核方式 | 星期 | 节次 | 周次 | 教室 | 教师\n设计工作坊 | 作品答辩 | 三 | 5-6 | 1-8 | 艺术楼201 | 赵老师\n统计学 | 考试课 | 2 | 1-2 | 1-8 | A202 | 孙老师'});
+  assert.equal(result.courses.length, 2, JSON.stringify(result.warnings));
+  const design = result.courses.find(course => course.name === '设计工作坊');
+  assert.equal(design.assessment, '作品答辩');
+  assert.equal(design.teacher, '赵老师');
+  assert.equal(design.location, '艺术楼201');
+  assert.equal(design.day, 3);
+  assert.equal(result.courses.find(course => course.name === '统计学').assessment, '考试');
+});
+
+test('未提供考核方式不由必修或含考试的课程名推断', () => {
+  const result = parseSchedule({text:'课程名称：大学英语考试研究\n星期：一\n节次：1-2\n周次：1-4\n课程性质：必修'});
+  assert.equal(result.courses[0].name, '大学英语考试研究');
+  assert.equal(result.courses[0].assessment, '未设置');
+});
+
+test('相同安排先缺省后明确考核方式能补全，倒序一致', () => {
+  const line = '材料基础 | 周一 | 第1-2节 | 1-4周 | 张老师 | A101';
+  for (const rows of [[line, `${line} | 考试课`], [`${line} | 考试`, line]]) {
+    const result = parseSchedule({text:rows.join('\n')});
+    assert.equal(result.courses.length, 1);
+    assert.equal(result.courses[0].assessment, '考试');
+    assert.deepEqual(result.warnings, []);
+  }
+});
+
+test('单条和重复安排的明确考核冲突均提示，不猜一个结果', () => {
+  const line = '材料基础 | 周一 | 第1-2节 | 1-4周 | 张老师 | A101';
+  for (const text of [`${line} | 考核方式：考试 | 考核方法：考查`, `${line} | 考试\n${line} | 考查\n${line} | 考试`]) {
+    const result = parseSchedule({text});
+    assert.equal(result.courses.length, 1);
+    assert.equal(result.courses[0].assessment, '未设置');
+    assert.equal(result.courses[0].assessmentConflict, true);
+    assert.match(result.warnings.join(''), /考核方式/);
+    assert.match(result.warnings.join(''), /冲突/);
+  }
+});
+
+test('课程 JSON 保留考核方式并合并重复记录的缺失字段', () => {
+  const course = {name:'设计',day:2,startPeriod:1,endPeriod:2,weeks:[1,2]};
+  const result = parseSchedule({text:JSON.stringify([course,{...course,assessment:'作品答辩'}])});
+  assert.equal(result.courses.length, 1);
+  assert.equal(result.courses[0].assessment, '作品答辩');
+});
+
+test('考核冲突标记跨导入步骤保留，后来的明确值不能掩盖冲突', () => {
+  const course = {name:'设计',day:2,startPeriod:1,endPeriod:2,weeks:[1,2]};
+  for (const entries of [[{...course,assessmentConflict:true},{...course,assessment:'考试'}],[{...course,assessment:'考试'},{...course,assessmentConflict:true}]]) {
+    const result = parseSchedule({text:JSON.stringify(entries)});
+    assert.equal(result.courses.length, 1);
+    assert.equal(result.courses[0].assessment, '未设置');
+    assert.equal(result.courses[0].assessmentConflict, true);
+  }
+  const literal = parseSchedule({text:JSON.stringify([{...course,assessment:'考试',assessmentConflict:'true'}])});
+  assert.equal(literal.courses[0].assessment, '考试');
+  assert.equal(literal.courses[0].assessmentConflict, undefined);
+});
 
 test('导入结构化课表文本，保持教师教室和单双周', () => {
   const result = parseSchedule({ text: '课程名称 | 星期 | 节次 | 周次 | 教师 | 教室\n高等数学 | 周一 | 第1-2节 | 1-16周(单) | 王老师 | A201\n大学英语 | 周三 | 第3-4节 | 2-16周(双) | 李老师 | B302' });

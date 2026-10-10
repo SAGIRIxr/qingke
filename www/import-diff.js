@@ -29,12 +29,12 @@ function sameArrangement(a,b){
     &&(!at||!bt||at===bt)&&(!al||!bl||locationEqual(a.location,b.location));
 }
 const signature=value=>JSON.stringify([nameKey(value.name),value.day,value.startPeriod,value.endPeriod,weekKey(value),teacherKey(value.teacher),locationKey(value.location)]);
+const assessmentOf=value=>String(value??'').trim()||'未设置';
 function importedCourse(raw){
-  const course=createCourse(raw),value=raw.assessment;
-  if(value!=null&&typeof value!=='string')throw new Error('考核方式应为文字');
-  const assessment=(value??'').trim()||'未设置';
-  if(assessment.length>30)throw new Error('考核方式不能超过 30 个字符');
-  return {...course,assessment};
+  const course=createCourse(raw);
+  // This marker belongs to the import preview only, never persisted courses
+  // or importSource snapshots. A parser conflict must survive deduplication.
+  return raw.assessmentConflict===true?{...course,assessment:'未设置',assessmentConflict:true}:course;
 }
 function sourceOptions(options={}){
   const kind=options.kind??'text';
@@ -58,17 +58,74 @@ function affinity(before,incoming){
   return 10+(sameTeacher?3:0)+(sameLocation?2:0)+(sameWeeks?1:0);
 }
 
+function assessmentChanges(items,rows,candidates,warnings){
+  const courses=new Map(rows.map(row=>[row.courseId,row.course])),groups=new Map();
+  for(const item of items){
+    const course=courses.get(item.courseId),current=assessmentOf(course?.assessment);
+    // Assessment is course-level metadata. Keep it out of persisted session
+    // snapshots so old imports and shared data retain the same schema.
+    if(item.before)item.before.assessment=current;
+    if(item.after)item.after.assessment=course?current:assessmentOf(item.incoming?.assessment);
+    if(course&&item.incoming&&['same','changed'].includes(item.status)){
+      if(!groups.has(course.id))groups.set(course.id,[]);
+      groups.get(course.id).push(item);
+    }
+  }
+  for(const [courseId,group] of groups){
+    const course=courses.get(courseId),current=assessmentOf(course.assessment);
+    const values=[...new Set(group.flatMap(item=>[...candidates.get(item.incoming)]))].sort();
+    if(values.length>1||group.some(item=>item.incoming.assessmentConflict===true)){
+      const message=`“${course.name}”的导入条目包含冲突的考核方式${values.length>1?`（${values.join('、')}）`:''}，已保留现有设置，请核对后手动填写。`;
+      warnings.push(message);
+      for(const item of group){item.message+=` ${message}`;if(item.status==='changed')item.protectedFields=[...new Set([...(item.protectedFields??[]),'assessment'])];}
+      continue;
+    }
+    if(!values.length)continue;
+    const incoming=values[0];
+    if(current!=='未设置'&&current!==incoming){
+      const message=`“${course.name}”已有考核方式“${current}”，来源为“${incoming}”；已保留现有设置。`;
+      warnings.push(message);
+      for(const item of group){
+        if(!candidates.get(item.incoming).size)continue;
+        item.message+=` ${message}`;
+        if(item.status==='changed')item.protectedFields=[...new Set([...(item.protectedFields??[]),'assessment'])];
+      }
+    }else if(current==='未设置'){
+      for(const item of group){
+        // Only an explicitly selected row carrying the metadata may fill it.
+        // A sibling session with no assessment does not grant that consent.
+        if(!candidates.get(item.incoming).size)continue;
+        item.after.assessment=incoming;
+        if(item.status==='same'){
+          item.status='changed';item.protectedFields=[];
+          item.message='发现未填写的考核方式；勾选后补入，原有安排与手动修改保持不变。';
+        }else item.message+=' 勾选后同时补入未填写的考核方式。';
+      }
+    }
+  }
+}
+
 /** Conservative re-import plan. No writes occur before applyImport. */
 export function diffImport(semester,flatCourses,options={}){
   if(!semester||!Array.isArray(semester.courses)||!Array.isArray(flatCourses)||flatCourses.length>500)throw new Error('导入课程格式无效或超过 500 条');
-  const source=sourceOptions(options),rows=existingRows(semester),used=new Set(),items=[],warnings=[],seen=new Set();
+  const source=sourceOptions(options),rows=existingRows(semester),used=new Set(),items=[],warnings=[],seen=new Map(),assessmentCandidates=new Map(),sourceIdsByIncoming=new Map();
   const incomingRows=[];
   for(const raw of flatCourses){
     const incoming=importedCourse(raw);
     if(incoming.weeks.some(week=>week>semester.totalWeeks))throw new Error(`“${incoming.name}”周次超出学期范围`);
-    if(seen.has(signature(incoming))){warnings.push(`“${incoming.name}”有重复导入条目，已合并。`);continue;}
-    seen.add(signature(incoming));incomingRows.push(incoming);
+    const key=signature(incoming),existing=seen.get(key);
+    if(existing){
+      sourceIdsByIncoming.get(existing).add(incoming.id);
+      const values=assessmentCandidates.get(existing);
+      if(incoming.assessment!=='未设置')values.add(incoming.assessment);
+      if(incoming.assessmentConflict===true||values.size>1)existing.assessmentConflict=true;
+      existing.assessment=!existing.assessmentConflict&&values.size===1?[...values][0]:'未设置';
+      warnings.push(`“${incoming.name}”有重复导入条目，已合并。`);
+      continue;
+    }
+    seen.set(key,incoming);sourceIdsByIncoming.set(incoming,new Set([incoming.id]));assessmentCandidates.set(incoming,new Set(incoming.assessment==='未设置'?[]:[incoming.assessment]));incomingRows.push(incoming);
   }
+  for(const incoming of incomingRows)if(incoming.assessmentConflict===true)warnings.push(`“${incoming.name}”的导入考核方式存在冲突，未自动采用；请核对后手动填写。`);
   // Reserve exact matches first so a changed row cannot steal another row's
   // unchanged arrangement merely because the input order differs.
   const plans=incomingRows.map(incoming=>({incoming,exact:rows.filter(row=>sameArrangement(row.current,incoming)||row.baseline&&sameArrangement(row.baseline,incoming))}));
@@ -110,6 +167,10 @@ export function diffImport(semester,flatCourses,options={}){
     if(row.session.importSource.kind!==source.kind||row.session.importSource.source!==source.source)continue;
     items.push({key:`import-${ordinal++}`,status:'missing',courseId:row.courseId,sessionId:row.sessionId,before:clone(row.current),message:'本次文件未包含此安排；原课程与调课记录均保留，不自动删除。'});
   }
+  // Preview edits need every normalized duplicate's origin so an explicit
+  // correction is not undone by an otherwise invisible sibling input row.
+  for(const item of items)if(item.incoming)item.sourceIds=[...sourceIdsByIncoming.get(item.incoming)];
+  assessmentChanges(items,rows,assessmentCandidates,warnings);
   const counts=Object.fromEntries(['new','same','changed','missing','ambiguous'].map(status=>[status,items.filter(item=>item.status===status).length]));
   return {items,warnings:[...new Set(warnings)],counts,source,baseSignature:JSON.stringify(semester)};
 }
@@ -139,6 +200,7 @@ export function applyImport(semester,diff,selections){
       if(!session)throw new Error('导入对应的上课安排不存在，请重新预览。');
       const after=item.after;
       course.name=after.name;
+      if(assessmentOf(course.assessment)==='未设置'&&assessmentOf(after.assessment)!=='未设置')course.assessment=after.assessment;
       for(const field of FIELDS.filter(field=>field!=='name'))session[field]=clone(after[field]);
       session.importSource={...source,key:session.importSource?.key??session.id,snapshot:snapshot(incoming)};
     }

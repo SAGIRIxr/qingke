@@ -1,4 +1,5 @@
 import { parseSchedule } from './importer.js';
+import { isAssessmentMetadata } from './import-metadata.js';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_PAGES = 30;
@@ -11,7 +12,25 @@ const dayOf = value => {
 };
 const hasWeeks = text => /\d\s*(?:[（(]周[）)]|周)/.test(text) || /周次\s*[:：]/.test(text);
 const hasPeriods = text => /\d\s*(?:[（(]节[）)]|节)/.test(text) || /节次\s*[:：]/.test(text);
-const metaLine = text => /^(?:周次|节次|教师|老师|任课教师|教室|地点|上课地点|教学班|学分|考核|备注|星期)\s*[:：]/.test(text) || hasWeeks(text) || hasPeriods(text);
+const metaLine = text => isAssessmentMetadata(text) || /^(?:周次|节次|教师|老师|任课教师|教室|地点|上课地点|教学班|学分|备注|星期)\s*[:：]/.test(text) || hasWeeks(text) || hasPeriods(text);
+
+function joinAssessmentLines(lines) {
+  // Some exports wrap a label or a Chinese value halfway through a word.
+  // Join only complete, explicit assessment tokens, never arbitrary course text.
+  const joined=[];
+  for(let index=0;index<lines.length;index++){
+    let last=index,merged=null;
+    for(let end=index;end<Math.min(lines.length,index+4);end++){
+      if(end>index&&(lines[end].y-lines[end-1].y>Math.max(lines[end].height,lines[end-1].height)*1.8||Math.abs(lines[end].x-lines[index].x)>20))break;
+      const compact=lines.slice(index,end+1).map(line=>line.text).join('').replace(/\s/g,'');
+      const match=compact.match(/^(?:(考核方式|考核方法|考核形式|考核类别|考核类型|考核)[:：]?)?(考试课?|考查课?)$/);
+      if(match){last=end;merged=match[1]?`${match[1]}：${match[2]}`:match[2];}
+    }
+    joined.push(merged?{...lines[index],text:merged}:lines[index]);
+    index=last;
+  }
+  return joined;
+}
 
 function linesOf(items) {
   const rows = [];
@@ -42,7 +61,8 @@ function splitBlocks(lines) {
     current.push(line);
   }
   if(current.length)groups.push(current);
-  return groups.flatMap(group=>{
+  return groups.flatMap(rawGroup=>{
+    const group=joinAssessmentLines(rawGroup);
     const result=[];let start=0,seenWeeks=false;
     for(let index=0;index<group.length;index++){
       if(!hasWeeks(group[index].text))continue;
@@ -64,7 +84,7 @@ function splitBlocks(lines) {
  */
 export function parsePdfTextPages(pages,{totalWeeks=20,name='课表 PDF'}={}) {
   const result={courses:[],warnings:[],source:clean(name).slice(0,100)||'课表 PDF'};
-  const fingerprints=new Set();let textPages=0;
+  const fingerprints=new Map(),assessmentConflicts=new Set();let textPages=0;
   if(!Array.isArray(pages)||pages.length>MAX_PAGES) return {...result,warnings:[`PDF 最多支持 ${MAX_PAGES} 页。`]};
   if(!Number.isInteger(totalWeeks)||totalWeeks<1||totalWeeks>30)return {...result,warnings:['学期周数应为 1—30。']};
   const warn=text=>{if(result.warnings.length<80)result.warnings.push(text);};
@@ -72,7 +92,18 @@ export function parsePdfTextPages(pages,{totalWeeks=20,name='课表 PDF'}={}) {
     parsed.warnings.forEach(warning=>warn(`第 ${page} 页：${warning}`));
     for(const course of parsed.courses){
       const key=JSON.stringify([course.name,course.teacher,course.location,course.day,course.startPeriod,course.endPeriod,course.weeks]);
-      if(!fingerprints.has(key)&&result.courses.length<500){fingerprints.add(key);result.courses.push(course);}
+      const existing=fingerprints.get(key);
+      if(!existing&&result.courses.length<500){fingerprints.set(key,course);result.courses.push(course);}
+      else if(existing&&(course.assessmentConflict||existing.assessmentConflict)){
+        existing.assessment='未设置';existing.assessmentConflict=true;assessmentConflicts.add(key);
+      }
+      else if(existing&&!assessmentConflicts.has(key)&&course.assessment&&course.assessment!=='未设置'){
+        if(!existing.assessment||existing.assessment==='未设置')existing.assessment=course.assessment;
+        else if(existing.assessment!==course.assessment){
+          existing.assessment='未设置';existing.assessmentConflict=true;assessmentConflicts.add(key);
+          warn(`第 ${page} 页：“${course.name.slice(0,35)}”的重复课程考核方式不一致，已留空，请核对原课表。`);
+        }
+      }
     }
   };
   pages.forEach((page,pageIndex)=>{
