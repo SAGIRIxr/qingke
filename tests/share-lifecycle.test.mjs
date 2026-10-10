@@ -23,6 +23,60 @@ function remote(semester,revision=1,allowFollow=true){return {...sharePayload(se
 function owner(env,allowFollow=true){return {code:CODE,server:SERVER,deleteToken:'valid-management-token-1234',localSemesterId:env.state.semesters[0].id,name:'共享学期',allowFollow,autoPublish:allowFollow,revision:1,includeNotes:false,includeExams:false,createdAt:'2026-01-01T00:00:00Z',expiresAt:'2099-01-01T00:00:00Z'};}
 const button=dataset=>({dataset,disabled:false});
 
+for(const entry of ['manual','link','clipboard'])test(`${entry} 接收允许跟随的分享时默认勾选，确认导入后才建立只读跟随`,async t=>{
+  const env=environment(t),requests=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{requests.push({url,method:options.method});return new Response(JSON.stringify(remote(env.state.semesters[0])));});
+  const ui=createShareUI(env.ctx);
+  if(entry==='manual')await ui.click('share-receive',button({}));
+  else ui.openShare({code:CODE,server:SERVER,source:entry});
+  assert.equal(requests.length,0);
+  await ui.submit({id:'share-receive-form',querySelector:()=>button({})},{code:CODE,server:SERVER});
+  const checkbox=env.modal.innerHTML.match(/<input\b[^>]*name="follow"[^>]*>/)?.[0];
+  assert.ok(checkbox);assert.match(checkbox,/\bchecked\b/);
+  assert.equal(env.saved,0);assert.equal(env.data.has('qingke.follows.v1'),false);
+  await ui.submit({id:'share-import-form'},{name:'朋友的学期',follow:'on'});
+  assert.equal(env.saved,1);assert.equal(env.state.semesters.length,2);
+  const followed=JSON.parse(env.data.get('qingke.follows.v1'));
+  assert.equal(followed.length,1);assert.equal(followed[0].enabled,true);
+  assert.equal(followed[0].localSemesterId,env.state.activeSemesterId);
+  assert.equal(env.data.has('qingke.shares.v1'),false);
+  assert.deepEqual(requests.map(r=>r.method),['GET']);
+});
+
+test('默认勾选跟随后主动取消，只导入本地副本',async t=>{
+  const env=environment(t);
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify(remote(env.state.semesters[0]))));
+  const ui=createShareUI(env.ctx);
+  await ui.submit({id:'share-receive-form',querySelector:()=>button({})},{code:CODE,server:SERVER});
+  await ui.submit({id:'share-import-form'},{name:'仅保存副本'});
+  assert.equal(env.saved,1);assert.equal(env.state.semesters.at(-1).name,'仅保存副本');
+  assert.equal(env.data.has('qingke.follows.v1'),false);assert.equal(env.data.has('qingke.shares.v1'),false);
+});
+
+test('分享者未允许跟随时不显示跟随开关，即使提交带勾选也不建立跟随',async t=>{
+  const env=environment(t);
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify(remote(env.state.semesters[0],1,false))));
+  const ui=createShareUI(env.ctx);
+  await ui.submit({id:'share-receive-form',querySelector:()=>button({})},{code:CODE,server:SERVER});
+  assert.doesNotMatch(env.modal.innerHTML,/name="follow"/);assert.match(env.modal.innerHTML,/分享者未开启持续更新/);
+  await ui.submit({id:'share-import-form'},{name:'单次课表',follow:'on'});
+  assert.equal(env.saved,1);assert.equal(env.data.has('qingke.follows.v1'),false);
+});
+
+test('分享课表保存失败时不建立跟随，重试仍尊重用户取消勾选',async t=>{
+  const env=environment(t),save=env.ctx.save;let canSave=false;
+  env.ctx.save=(...args)=>canSave?save(...args):false;
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify(remote(env.state.semesters[0]))));
+  const ui=createShareUI(env.ctx);
+  await ui.submit({id:'share-receive-form',querySelector:()=>button({})},{code:CODE,server:SERVER});
+  const preview=env.modal.firstChild;
+  await ui.submit({id:'share-import-form'},{name:'稍后保存',follow:'on'});
+  assert.equal(env.saved,0);assert.equal(env.data.has('qingke.follows.v1'),false);assert.equal(env.modal.firstChild,preview);
+  canSave=true;
+  await ui.submit({id:'share-import-form'},{name:'稍后保存'});
+  assert.equal(env.saved,1);assert.equal(env.data.has('qingke.follows.v1'),false);
+});
+
 test('外部链接只展示确认表单，不请求网络、不改变默认服务或现有学期',t=>{
  const env=environment(t);let network=0;t.mock.method(globalThis,'fetch',()=>{network++;throw Error('Must not fetch before confirmation');});
  const ui=createShareUI(env.ctx);ui.openShare({code:'0123456789ABCDEFGHJK',server:'https://friend.example',source:'clipboard'});

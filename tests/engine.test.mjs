@@ -12,6 +12,18 @@ function state() {
 }
 const at = (h, minute, day = 7) => new Date(2026, 8, day, h, minute);
 
+test('下一课索引可省略冲突引用，实际调课、考试与起止时间保持一致', () => {
+  const s = state().semesters[0];
+  s.courses.push(course({id:'c2', sessions:[{...course().sessions[0],id:'s2'}]}));
+  s.exceptions=[{id:'move',sessionId:'s1',sourceDate:'2026-09-07',type:'move',date:'2026-09-08',startPeriod:1,endPeriod:2,location:'B102',teacher:'',note:''}];
+  s.exams=[{id:'exam',name:'独立考试',date:'2026-09-21',startTime:'08:00',endTime:'09:30',location:'A101',note:''}];
+  const full=notificationEvents(s), light=notificationEvents(s,{includeConflicts:false});
+  assert.ok(full.some(x=>x.conflicts.length>0));
+  assert.ok(light.every(x=>x.conflicts.length===0&&!x.conflict));
+  const content=items=>items.map(({conflict,conflicts,...item})=>item);
+  assert.deepEqual(content(light),content(full));
+});
+
 test('初始偏好不内置学校网址，默认状态可直接保存', () => {
   const value = createState();
   assert.equal(value.preferences.schoolUrl, '');

@@ -89,7 +89,7 @@ export function createShareUI(ctx){
   }
   function receivePreview(){
     const s=receiveDraft.semester;
-    sheet('预览分享课表',`<form id="share-import-form">${field('新学期名称',input('name',s.name,'text','required maxlength="80"'))}<div class="share-summary"><p>${s.startDate} 开始 · ${s.totalWeeks} 周</p><p>${s.courses.length} 门课程 · ${s.exams.length} 场考试 · ${s.profiles.length} 套作息</p></div><div class="share-course-preview">${s.courses.map(c=>`<p><strong>${esc(c.name)}</strong><small>${c.sessions.map(t=>esc(t.location||'地点待定')).join(' / ')}</small></p>`).join('')}</div><p class="helper-box">导入后保存为独立学期。请核对学校校历和作息，原有学期不会被覆盖。</p>${receiveDraft.allowFollow?'<label class="check-row"><input type="checkbox" name="follow"><span><strong>跟随分享者的后续更新</strong><small>打开 App 或回到前台时检查，保留我自己的修改，有冲突先核对。</small></span></label>':'<p class="source-note">分享者未开启持续更新，将导入当前副本。</p>'}${submit('导入为新学期')}</form>`);
+    sheet('预览分享课表',`<form id="share-import-form">${field('新学期名称',input('name',s.name,'text','required maxlength="80"'))}<div class="share-summary"><p>${s.startDate} 开始 · ${s.totalWeeks} 周</p><p>${s.courses.length} 门课程 · ${s.exams.length} 场考试 · ${s.profiles.length} 套作息</p></div><div class="share-course-preview">${s.courses.map(c=>`<p><strong>${esc(c.name)}</strong><small>${c.sessions.map(t=>esc(t.location||'地点待定')).join(' / ')}</small></p>`).join('')}</div><p class="helper-box">导入后保存为独立学期。请核对学校校历和作息，原有学期不会被覆盖。</p>${receiveDraft.allowFollow?'<label class="check-row"><input type="checkbox" name="follow" checked><span><strong>跟随分享者的后续更新</strong><small>导入后开启，可取消勾选。打开 App 或回到前台时检查，保留我自己的修改，有冲突先核对。</small></span></label>':'<p class="source-note">分享者未开启持续更新，将导入当前副本。</p>'}${submit('导入为新学期')}</form>`);
   }
   function manage(){
     const list=records().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
@@ -152,7 +152,7 @@ export function createShareUI(ctx){
     }
     if(form.id==='share-import-form'){
       if(!receiveDraft)throw Error('请重新读取分享课表');const s={...receiveDraft.semester,name:values.name};
-      if(ctx.save({...state(),semesters:[...state().semesters,s],activeSemesterId:s.id},'导入分享课表前')){let message='课表已导入为新学期';if(values.follow==='on')try{follow.subscribe(receiveDraft);message+='，跟随已开启';}catch(e){message+='；跟随未保存：'+e.message;}receiveDraft=null;ctx.refresh();toast(message);}return true;
+      if(ctx.save({...state(),semesters:[...state().semesters,s],activeSemesterId:s.id},'导入分享课表前')){let message='课表已导入为新学期';if(receiveDraft.allowFollow&&values.follow==='on')try{follow.subscribe(receiveDraft);message+='，跟随已开启';}catch(e){message+='；跟随未保存：'+e.message;}receiveDraft=null;ctx.refresh();toast(message);}return true;
     }
     return false;
   }

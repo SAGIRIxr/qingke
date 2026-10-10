@@ -81,3 +81,29 @@ test('parent-triggered page animation is not duplicated',()=>{
   f.touch('touchstart',260,100);f.touch('touchmove',100,100,{after:60});f.touch('touchend',100,100);
   assert.equal(f.root.current.animations.length,1);
 });
+
+test('page and tab motion keep text opaque throughout each animation',()=>{
+  const f=setup();
+  f.root.current.style.opacity='1';f.root.page.style.opacity='1';
+  f.motion.animatePage(1);f.motion.animateTab();
+  for(const node of [f.root.current,f.root.page]){
+    assert.equal(node.style.opacity,'1');
+    assert.ok(node.animations.length);
+    for(const animation of node.animations){
+      assert.ok(animation.keyframes.every(frame=>!Object.hasOwn(frame,'opacity')));
+      assert.ok(animation.keyframes.every(frame=>Object.hasOwn(frame,'transform')));
+    }
+  }
+});
+
+test('drag and canceled swipe never dim the timetable and restore its original style',()=>{
+  const f=setup();
+  f.root.current.style.opacity='1';
+  f.touch('touchstart',260,100);f.touch('touchmove',230,102,{after:250});f.flush();
+  assert.equal(f.root.current.style.opacity,'1');assert.equal(f.root.current.style.willChange,'transform');
+  f.touch('touchend',230,102,{after:250});
+  assert.deepEqual(f.directions,[]);
+  const animation=f.root.current.animations.at(-1);
+  assert.ok(animation.keyframes.every(frame=>!Object.hasOwn(frame,'opacity')));
+  animation.onfinish();assert.equal(f.root.current.style.opacity,'1');assert.equal(f.root.current.style.transform,'');
+});

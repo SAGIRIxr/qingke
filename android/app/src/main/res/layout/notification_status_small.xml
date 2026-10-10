@@ -1,15 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Android may give collapsed custom content only 48dp. Keep both rows within 44dp,
+     with a separate destination field so a long course name cannot push it offscreen. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="vertical">
-    <TextView android:id="@+id/status_title"
-        android:layout_width="match_parent" android:layout_height="21dp"
-        android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
-        android:textSize="14sp" android:singleLine="true" android:ellipsize="end"
-        android:includeFontPadding="false" android:gravity="center_vertical" />
-    <Chronometer android:id="@+id/status_clock"
-        android:layout_width="match_parent" android:layout_height="23dp"
-        android:textAppearance="@android:style/TextAppearance.Material.Notification.Line2"
-        android:textSize="15sp" android:textStyle="bold" android:singleLine="true"
-        android:includeFontPadding="false" android:gravity="center_vertical" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="22dp"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@+id/status_location"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:textAppearance="@android:style/TextAppearance.Material.Notification.Title"
+            android:textSize="14sp" android:textStyle="bold" android:singleLine="true" android:ellipsize="end"
+            android:includeFontPadding="false" android:gravity="center_vertical" />
+        <TextView android:id="@+id/status_boundary"
+            android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginStart="8dp"
+            android:textAppearance="@android:style/TextAppearance.Material.Notification.Line2"
+            android:textSize="13sp" android:singleLine="true"
+            android:includeFontPadding="false" android:gravity="center_vertical" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="22dp"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@+id/status_title"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+            android:textAppearance="@android:style/TextAppearance.Material.Notification.Line2"
+            android:textSize="13sp" android:singleLine="true" android:ellipsize="end"
+            android:includeFontPadding="false" android:gravity="center_vertical" />
+        <Chronometer android:id="@+id/status_clock"
+            android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginStart="8dp"
+            android:textAppearance="@android:style/TextAppearance.Material.Notification.Line2"
+            android:textSize="13sp" android:textStyle="bold" android:singleLine="true"
+            android:includeFontPadding="false" android:gravity="center_vertical" />
+    </LinearLayout>
 </LinearLayout>

@@ -16,6 +16,9 @@ public final class StatusPresentationTest {
         check(before.countdown && before.label.equals("距开始上课"), "Before class always counts down even in elapsed mode");
         check(before.chronometerBase == UPTIME + 5 * M, "Countdown base uses elapsedRealtime rather than epoch");
         check(before.fallback.contains("05:00") && before.fallback.contains("更新时"), "Fallback contains a labeled numeric snapshot");
+        check(before.location.equals("A101") && before.compactTitle.equals("高等数学"), "Collapsed classroom and course have independent fields");
+        check(before.compactLabel.equals("距上课") && before.boundary.equals("16:00 上课"), "Compact pre-class view retains local start time and clear countdown label");
+        check(before.fallback.startsWith("A101 · "), "System fallback prioritizes classroom over the timer snapshot");
         StatusPresentation current = new StatusPresentation(plan.stateAt(START + 20 * M), START + 20 * M, UPTIME, false, ZONE);
         check(current.label.equals("距课间") && current.chronometerBase == UPTIME + 25 * M, "First section countdown reaches break");
         check(current.timeout == 25 * M, "Status expires at the displayed boundary");
@@ -25,10 +28,13 @@ public final class StatusPresentationTest {
         check(pause.countdown && pause.label.equals("距继续上课"), "Break counts down even if elapsed is selected");
         check(pause.chronometerBase == UPTIME + 5 * M, "Break clock reaches second subsection");
         check(pause.elapsedDetail.contains("45:00"), "Elapsed freezes at 45 minutes during break");
+        check(pause.compactLabel.equals("距续课") && pause.boundary.equals("16:55 续课"), "Compact break view distinguishes resume time from course start");
+        check(!pause.boundary.equals(before.boundary), "Compact break boundary follows the next segment");
         StatusPresentation after = new StatusPresentation(plan.stateAt(START + 65 * M), START + 65 * M, UPTIME, true, ZONE);
         check(!after.countdown && after.label.equals("累计授课"), "Second section resumes elapsed chronometer");
         check(after.chronometerBase == UPTIME - 55 * M, "Elapsed chronometer excludes the ten-minute break");
         check(after.when == START + 10 * M, "Standard template fallback shares correct accumulated base");
+        check(after.compactLabel.equals("已授课") && after.boundary.equals("17:40 下课"), "Compact elapsed view keeps the class end visible");
         StatusPresentation last = new StatusPresentation(plan.stateAt(START + 65 * M), START + 65 * M, UPTIME, false, ZONE);
         check(last.label.equals("距下课") && last.chronometerBase == UPTIME + 35 * M, "Last section countdown reaches course end");
         SchedulePlan.Event exam = new SchedulePlan.Event("exam:1", "大学英语", "B102", START, START + 90 * M,
@@ -37,6 +43,14 @@ public final class StatusPresentationTest {
         StatusPresentation takingExam = new StatusPresentation(exams.stateAt(START + M), START + M, UPTIME, false, ZONE);
         check(takingExam.title.contains("考试中") && takingExam.label.equals("距考试结束"), "Absolute exam events use exam labels");
         check(new StatusPresentation(exams.stateAt(START - M), START - M, UPTIME, false, ZONE).label.equals("距开考"), "Exam reminder label");
+        StatusPresentation beforeExam = new StatusPresentation(exams.stateAt(START - M), START - M, UPTIME, false, ZONE);
+        check(beforeExam.compactLabel.equals("距开考") && beforeExam.boundary.endsWith(" 开考"), "Compact exam countdown is not mislabeled as class");
+        SchedulePlan.Event noRoom = new SchedulePlan.Event("no-room", "一门名称非常长的课程不会挤掉教室这一独立字段", "", START, START + 45 * M,
+                List.of(new SchedulePlan.Segment(START, START + 45 * M)));
+        SchedulePlan noRoomPlan = new SchedulePlan(false, true, false, 10, List.of(noRoom));
+        StatusPresentation absentRoom = new StatusPresentation(noRoomPlan.stateAt(START - M), START - M, UPTIME, false, ZONE);
+        check(absentRoom.location.equals("地点未设置") && absentRoom.fallback.startsWith("地点未设置 · "), "Unset classroom is explicit on compact and fallback surfaces");
+        check(absentRoom.compactTitle.equals(noRoom.name), "Presentation preserves full course name for independent layout ellipsis");
         check(StatusPresentation.duration(-1).equals("00:00"), "Fallback never displays negative countdown");
         check(StatusPresentation.duration(65 * M + 3_000).equals("1:05:03"), "Long exam duration is not truncated");
         System.out.println("PASS: " + checks + " notification presentation checks");

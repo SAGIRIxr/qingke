@@ -213,7 +213,7 @@ function examOccurrence(exam) {
 }
 
 /** Source identity stays stable across replacement days and individual moves. */
-export function occurrencesOn(semester, value) {
+export function occurrencesOn(semester, value, {includeConflicts=true}={}) {
   date(value); const rules = semester.dayRules ?? [], exceptions = semester.exceptions ?? [];
   const rule = rules.find(r => r.date === value), isConsumed = rules.some(r => r.type === 'replace' && r.sourceDate === value);
   const candidates = rule?.type === 'replace' ? baseOn(semester, rule.sourceDate) : (rule?.type === 'off' || isConsumed ? [] : baseOn(semester, value));
@@ -230,7 +230,7 @@ export function occurrencesOn(semester, value) {
   for (const exam of semester.exams ?? []) if (exam.date === value) occurrences.push(examOccurrence(exam));
   occurrences.sort((a, b) => a.startMs - b.startMs || a.name.localeCompare(b.name));
   for (const item of occurrences) {
-    item.conflicts = occurrences.filter(other => other.id !== item.id && other.startMs < item.endMs && other.endMs > item.startMs).map(other => other.id);
+      item.conflicts = includeConflicts ? occurrences.filter(other => other.id !== item.id && other.startMs < item.endMs && other.endMs > item.startMs).map(other => other.id) : [];
     item.conflict = item.conflicts.length > 0;
     item.onOffDay = rule?.type === 'off';
   }
@@ -259,12 +259,12 @@ export function occurrenceStatus(occurrence, now = new Date()) {
 }
 
 /** All dated instances, including makeup classes outside the semester date range. */
-export function notificationEvents(semester) {
+export function notificationEvents(semester, options) {
   const monday = getWeekDates(semester.startDate, 1)[0];
   const dates = new Set(Array.from({ length: semester.totalWeeks * 7 }, (_, i) => addDays(monday, i)));
   for (const rule of semester.dayRules ?? []) dates.add(rule.date);
   for (const ex of semester.exceptions ?? []) if (ex.type === 'move') dates.add(ex.date);
   for (const exam of semester.exams ?? []) dates.add(exam.date);
-  return [...dates].sort().flatMap(value => occurrencesOn(semester, value)).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+    return [...dates].sort().flatMap(value => occurrencesOn(semester, value, options)).sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
 }
 

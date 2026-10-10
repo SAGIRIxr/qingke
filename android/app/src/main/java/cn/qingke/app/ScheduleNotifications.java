@@ -233,11 +233,11 @@ final class ScheduleNotifications {
         SchedulePlan.Event event = point.event;
         boolean resume = point.type == SchedulePlan.CONTINUE;
         boolean exam = "exam".equals(event.type);
-        String title = (resume ? "课间结束 · " : exam ? "准备考试 · " : "准备上课 · ") + event.name;
-        String text = place(event) + " · " + time(resume ? point.at : event.start) + (resume ? " 继续上课" : " 开始")
-                + " · " + time(event.end) + (exam ? " 结束" : " 下课");
+        String title = event.name + (resume ? " · 课间结束" : exam ? " · 准备考试" : " · 准备上课");
+        String text = place(event) + " · " + time(resume ? point.at : event.start) + (resume ? " 续课" : exam ? " 开考" : " 上课");
+        String expandedText = text + " · " + time(event.end) + (exam ? " 结束" : " 下课");
         Notification notification = base(context, REMINDERS).setContentTitle(title).setContentText(text)
-                .setStyle(new Notification.BigTextStyle().bigText(text)).setAutoCancel(true)
+                .setStyle(new Notification.BigTextStyle().bigText(expandedText)).setAutoCancel(true)
                 .setTimeoutAfter(Math.max(1000, event.end - now)).build();
         try { context.getSystemService(NotificationManager.class).notify(event.id, REMINDER_ID, notification); }
         catch (SecurityException ignored) { /* User can revoke notifications at any point. */ }
@@ -259,13 +259,16 @@ final class ScheduleNotifications {
     }
     private static RemoteViews statusView(Context context, StatusPresentation display, boolean expanded) {
         RemoteViews view = new RemoteViews(context.getPackageName(), expanded ? R.layout.notification_status_big : R.layout.notification_status_small);
-        view.setTextViewText(R.id.status_title, display.title);
+        view.setTextViewText(R.id.status_title, expanded ? display.title : display.compactTitle);
         view.setChronometerCountDown(R.id.status_clock, display.countdown);
-        view.setChronometer(R.id.status_clock, display.chronometerBase, display.label + " %s", true);
+        view.setChronometer(R.id.status_clock, display.chronometerBase, (expanded ? display.label : display.compactLabel) + " %s", true);
         if (expanded) {
             view.setTextViewText(R.id.status_details, display.details);
             view.setTextViewText(R.id.status_elapsed_detail, display.elapsedDetail);
             view.setViewVisibility(R.id.status_elapsed_detail, display.elapsedDetail.isEmpty() ? View.GONE : View.VISIBLE);
+        } else {
+            view.setTextViewText(R.id.status_location, display.location);
+            view.setTextViewText(R.id.status_boundary, display.boundary);
         }
         return view;
     }

@@ -8,6 +8,7 @@ import java.util.Locale;
 /** Pure presentation/time-base calculation; both notification layouts use the same values. */
 final class StatusPresentation {
     final String title, label, details, fallback, elapsedDetail;
+    final String compactTitle, compactLabel, location, boundary;
     final boolean countdown;
     final long when, chronometerBase, timeout;
 
@@ -24,12 +25,18 @@ final class StatusPresentation {
         chronometerBase = elapsedRealtime + when - now;
         timeout = Math.max(1000, state.until - now);
         title = state.event.name + " · " + phase;
+        compactTitle = state.event.name;
+        compactLabel = countdown ? (inClass ? (exam ? "距结束" : state.until < state.event.end ? "距课间" : "距下课")
+                : onBreak ? "距续课" : (exam ? "距开考" : "距上课")) : (exam ? "已考试" : "已授课");
         String endpoint = DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA).format(Instant.ofEpochMilli(state.until).atZone(zone));
-        String location = state.event.location.isEmpty() ? "地点未设置" : state.event.location;
+        location = state.event.location.isEmpty() ? "地点未设置" : state.event.location;
+        boundary = endpoint + " " + (inClass ? (exam ? "结束" : state.until < state.event.end ? "课间" : "下课")
+                : onBreak ? "续课" : (exam ? "开考" : "上课"));
         details = location + " · " + endpoint + " " + action;
         // Standard text is retained for launchers/accessibility surfaces which omit custom views.
         // Clearly mark it as a snapshot, since only the system Chronometer updates every second.
-        fallback = label + " " + duration(value) + "（更新时） · " + details;
+        // Put the destination first even on system surfaces which replace our custom view.
+        fallback = details + " · " + label + " " + duration(value) + "（更新时）";
         elapsedDetail = onBreak ? "已授课 " + duration(state.elapsed) + " · 课间不计入授课时间"
                 : (!countdown && !exam ? "不含课间休息" : "");
     }

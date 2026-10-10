@@ -82,3 +82,12 @@ test('拥挤组明确展示总数与全部入口，当前课程槽位保留；�
   for (const o of items) assert.ok(html.includes(o.id));
   const details = conflictListMarkup(s, conflictGroups(items)[0]); assert.match(details, /&lt;img src=x onerror=alert\(1\)&gt;/); assert.doesNotMatch(details, /<img src=x/);
 });
+
+test('单独调课卡将正文与调课标签分区，窄卡保留单节布局信息与完整标记说明',()=>{
+  const s=fixture();s.courses=[s.courses[1]];s.exceptions[0].endPeriod=1;
+  const items=occurrencesOn(s,'2026-09-07'),html=renderCourseGrid({semester:s,dates:['2026-09-07'],groups:[items],maxPeriods:12});
+  assert.match(html,/data-period-span="1"/);
+  assert.match(html,/<div class="course-main">[\s\S]*<\/div><div class="course-meta">/);
+  assert.match(html,/<small class="change-mark" title="单次调课" aria-label="单次调课">调<\/small>/);
+  assert.match(html,/class="room-label">B202<\/span>/);
+});

@@ -12,7 +12,7 @@
 .\scripts\build-android.ps1 -Offline
 ```
 
-首次配置其他电脑时去掉 `-Offline` 以下载构建依赖；可使用 `-SdkPath`、`-GradlePath` 参数指定 SDK 和 Gradle，也可使用环境变量与 PATH。脚本只构建，不会安装或操作手机。默认生成已签名的 `dist\qingke-3.1.0-release.apk`；本地开发可加 `-Configuration Debug`。正式构建须先配置下述私有签名。Gradle `preBuild` 会把 `www` 同步至生成的 `android/app/src/main/assets/www`，不要直接编辑该生成目录。
+首次配置其他电脑时去掉 `-Offline` 以下载构建依赖；可使用 `-SdkPath`、`-GradlePath` 参数指定 SDK 和 Gradle，也可使用环境变量与 PATH。脚本只构建，不会安装或操作手机。默认生成已签名的 `dist\qingke-3.3.0-release.apk`；本地开发可加 `-Configuration Debug`。正式构建须先配置下述私有签名。Gradle `preBuild` 会把 `www` 同步至生成的 `android/app/src/main/assets/www`，不要直接编辑该生成目录。
 
 项目路径含中文，因此配置了 `android.overridePathCheck=true`。当前 Windows 环境已通过资源及 Java 编译；若其他工具链无法处理该路径，可将整个项目复制至纯英文路径再构建。
 
@@ -56,6 +56,7 @@
 | `window.onAppUpdateEvent(event)` | 更新事件；`type` 为 `checking/available/latest/progress/downloaded/verifying/installing/permission/cancelled/error/status`，携带当前 `phase`、`busy`、`manifest` 与字节进度 |
 | `window.onScheduleSyncError(payload)` | 对象 `{message}`，计划校验或存储失败，旧有效计划继续保留 |
 | `window.onShareResult(result)` | 对象 `{requestId,ok,status,data?,message?}`；使用 requestId 与原请求配对 |
+| `window.onAppForeground()` | 回到应用时打开当前教学周课表；页面存在编辑草稿、导入或分享预览时保留现场 |
 | `window.onNativeBack()` | 可选，返回 `true` 表示网页已关闭弹窗或处理返回；否则应用退至后台 |
 
 文件选择取消不会触发导入、导出成功回调，也不会改变课表。导出保留传入原文，不以 JSON 校验阻止损坏数据留存；恢复入口仍严格校验 JSON 对象，网页继续校验课表数据结构。读取错误显示原生提示，失败内容不会传入网页。导入回调会短暂等待网页模块初始化。JSON 读取和写入在后台线程执行。导出选择器打开期间若系统终止应用进程，需要返回课表重新导出；待导出的内容不写入额外缓存文件。

@@ -32,7 +32,7 @@ export function installTimetableMotion({root, onNavigate}) {
     stop(node);
     if (motionOff() || typeof node.animate !== 'function') { restore(node, saved); return; }
     restore(node, saved);
-    node.style.willChange = 'transform, opacity';
+    node.style.willChange = 'transform';
     const animation = node.animate(frames, {duration, easing: EASE, fill: 'none'});
     const entry = {animation, saved};
     active.set(node, entry);
@@ -49,8 +49,8 @@ export function installTimetableMotion({root, onNavigate}) {
     cancelFrame();
     if (!value) return;
     if (animateBack && value.axis === 'x') animate(value.node,
-      [{transform: `translate3d(${value.visualX}px,0,0)`, opacity: value.opacity},
-        {transform: value.saved.transform || 'none', opacity: value.saved.opacity || 1}], 220, value.saved);
+      [{transform: `translate3d(${value.visualX}px,0,0)`},
+        {transform: value.saved.transform || 'none'}], 220, value.saved);
     else restore(value.node, value.saved);
   }
   function reset(animateBack = true) {
@@ -68,8 +68,8 @@ export function installTimetableMotion({root, onNavigate}) {
     stop(node);
     const saved = snapshot(node);
     const offset = Math.sign(direction) * Math.min(48, node.getBoundingClientRect().width * .13);
-    animate(node, [{transform: `translate3d(${offset}px,0,0)`, opacity: .84},
-      {transform: saved.transform || 'none', opacity: saved.opacity || 1}], 220, saved);
+    animate(node, [{transform: `translate3d(${offset}px,0,0)`},
+      {transform: saved.transform || 'none'}], 220, saved);
   }
   function animateTab() {
     reset(false);
@@ -77,8 +77,8 @@ export function installTimetableMotion({root, onNavigate}) {
     const page = root.querySelector('.page');
     if (!page) return;
     const saved = snapshot(page);
-    animate(page, [{transform: 'translate3d(0,7px,0)', opacity: .78},
-      {transform: saved.transform || 'none', opacity: saved.opacity || 1}], 180, saved);
+    animate(page, [{transform: 'translate3d(0,7px,0)'},
+      {transform: saved.transform || 'none'}], 180, saved);
   }
   function touchStart(event) {
     if (event.touches.length !== 1) { reset(); return; }
@@ -111,14 +111,12 @@ export function installTimetableMotion({root, onNavigate}) {
     const atBoundary = blocked?.node === value.node && blocked.direction === direction;
     const limit = value.width * (atBoundary ? .1 : .42);
     value.visualX = motionOff() ? 0 : Math.sign(dx) * limit * (1 - Math.exp(-Math.abs(dx) / limit));
-    value.opacity = motionOff() ? 1 : 1 - Math.min(Math.abs(value.visualX) / value.width, 1) * .12;
     if (!frame) frame = view.requestAnimationFrame(() => {
       frame = 0;
       if (gesture !== value || !value.node.isConnected) return;
       value.node.style.transition = 'none';
-      value.node.style.willChange = 'transform, opacity';
+      value.node.style.willChange = 'transform';
       value.node.style.transform = `translate3d(${value.visualX}px,0,0)`;
-      value.node.style.opacity = String(value.opacity);
     });
   }
   function touchEnd(event) {

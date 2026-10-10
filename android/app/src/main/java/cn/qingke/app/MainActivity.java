@@ -781,6 +781,10 @@ public final class MainActivity extends Activity {
         readShareClipboardOnFocus(); // Finish a focus acquisition if its callback arrived before onResume.
         if (appWeb != null) appWeb.onResume();
         if (schoolWeb != null) schoolWeb.onResume();
+        // Returning to the app opens the current timetable; the page keeps open drafts intact.
+        if (appWeb != null && schoolWeb == null) {
+            appWeb.evaluateJavascript("window.onAppForeground?.()", null);
+        }
         ScheduleNotifications.refresh(this, false);
         dispatchNotificationStatus();
         if (updateClient != null) updateClient.resume();
