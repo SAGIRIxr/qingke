@@ -23,7 +23,8 @@ final class SchedulePlan {
         }
         Event(String id, String name, String location, long start, long end, List<Segment> segments, String type) {
             this.id = id; this.name = name; this.location = location;
-            this.start = start; this.end = end; this.segments = segments;
+            this.start = start; this.end = end;
+            this.segments = Collections.unmodifiableList(new ArrayList<>(segments));
             this.type = "exam".equals(type) ? "exam" : "course";
         }
     }
@@ -45,20 +46,23 @@ final class SchedulePlan {
     final boolean enabled, ongoing, breakReminder;
     final int minutes;
     final List<Event> events;
+    private List<Point> cachedPoints;
     SchedulePlan(boolean enabled, boolean ongoing, boolean breakReminder, int minutes, List<Event> events) {
         this.enabled = enabled; this.ongoing = ongoing; this.breakReminder = breakReminder;
         this.minutes = Math.max(0, Math.min(120, minutes));
-        this.events = events;
+        this.events = Collections.unmodifiableList(new ArrayList<>(events));
     }
     List<Point> points() {
+        if (cachedPoints != null) return cachedPoints;
         List<Point> points = new ArrayList<>();
-        if (!enabled && !ongoing) return points;
+        if (!enabled && !ongoing) return cachedPoints = Collections.emptyList();
         for (Event event : events) {
             long before = event.start - minutes * MINUTE;
             if (enabled) points.add(new Point(before, REMINDER, event));
             if (ongoing) points.add(new Point(before, STATE, event));
-            // End/start points also remove an expired reminder when ongoing is off.
-            points.add(new Point(event.start, STATE, event));
+            // Alert-only mode needs no wakeup at class start: the reminder already exists.
+            if (ongoing) points.add(new Point(event.start, STATE, event));
+            // End points remove an expired reminder even when ongoing is off.
             points.add(new Point(event.end, STATE, event));
             for (int i = 0; i < event.segments.size(); i++) {
                 Segment segment = event.segments.get(i);
@@ -71,7 +75,7 @@ final class SchedulePlan {
             }
         }
         points.sort(Comparator.comparingLong(point -> point.at));
-        return points;
+        return cachedPoints = Collections.unmodifiableList(points);
     }
     long nextAfter(long now) {
         for (Point point : points()) if (point.at > now) return point.at;

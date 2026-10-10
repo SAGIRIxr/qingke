@@ -5,6 +5,8 @@ import {createUpdateUI} from './update-ui.js';
 import {createManagementUI} from './manage-ui.js';
 import {createExamUI} from './exams-ui.js';
 import {createShareUI} from './share-ui.js';
+import {createLiveClock} from './live-clock.js';
+import {createBackgroundUI} from './background-ui.js';
 import {nextOccurrenceIds} from './course-live.js';
 import {installTimetableMotion} from './motion.js';
 import {DEFAULT_SETTINGS,getWeek,getWeekDates,parseWeeks} from './core.js';
@@ -13,7 +15,7 @@ import {loadState,commitState,recoveries,STATE_KEY} from './state-store.js';
 import {parseSchedule} from './importer.js';
 import {esc,clone,icon,DAYS,button,select,field,input,weeksText,toast,sheet,closeSheet,backSheet,errorBox,submit} from './ui.js';
 
-let state,storageError='',sharing,management,exams,motion,updater,shareEntry,importTargetId='',returnToImport=false;
+let state,storageError='',sharing,management,exams,motion,updater,shareEntry,background,importTargetId='',returnToImport=false;
 try{state=loadState();}catch(e){storageError=e.message;state=createState();}
 const app=document.querySelector('#app');
 const tabHistory=[];
@@ -36,12 +38,13 @@ function holiday2026(date){const ranges=[['01-01','01-03','元旦'],['02-15','02
 function syncNative(){
   if(!window.Android?.syncSchedule||storageError)return;
   const n=state.preferences.notifications;
-  try{const events=(n.enabled||n.ongoing)?notificationEvents(semester()).map(o=>({id:o.id,type:o.kind||'course',name:o.name,location:o.location,start:o.startMs,end:o.endMs,segments:o.breakMode==='continuous'?[{start:o.startMs,end:o.endMs}]:o.segments.map(s=>({start:s.startMs,end:s.endMs}))})):[];Android.syncSchedule(JSON.stringify({...n,events}));if(Android.getNotificationStatus)notificationStatus=JSON.parse(Android.getNotificationStatus());}catch(e){toast(`通知计划未同步：${e.message}`);}
+  try{const events=(n.enabled||n.ongoing)?notificationEvents(semester(),{includeConflicts:false}).map(o=>({id:o.id,type:o.kind||'course',name:o.name,location:o.location,start:o.startMs,end:o.endMs,segments:o.breakMode==='continuous'?[{start:o.startMs,end:o.endMs}]:o.segments.map(s=>({start:s.startMs,end:s.endMs}))})):[];Android.syncSchedule(JSON.stringify({...n,events}));if(Android.getNotificationStatus)notificationStatus=JSON.parse(Android.getNotificationStatus());}catch(e){toast(`通知计划未同步：${e.message}`);}
 }
 function save(next,label=''){if(storageError){toast('请先导出原始备份并恢复有效数据，避免覆盖旧课表');return false;}try{state=commitState(next,label);syncNative();sharing?.onStateSaved?.();return true;}catch(e){toast(`未能保存：${e.message}`);return false;}}
 function updateSemester(next,label=''){return save({...state,semesters:state.semesters.map(s=>s.id===next.id?next:s)},label);}
 const liveEventCache=new WeakMap();
 function refreshLive(root=app){
+  if(!root.querySelector('[data-live-id],[data-conflict-ids]'))return;
   const s=semester();
   if(!liveEventCache.has(s))liveEventCache.set(s,notificationEvents(s,{includeConflicts:false}));
   const now=Date.now();
@@ -120,7 +123,7 @@ window.onSchoolCapture=async payload=>{try{await previewImport(parseSchedule(typ
 function notificationSheet(){
   if(window.Android?.getNotificationStatus)try{notificationStatus=JSON.parse(Android.getNotificationStatus());}catch{}
   const n=state.preferences.notifications,st=notificationStatus;
-  sheet('提醒与课程状态',`<form id="notification-form"><label class="check-row"><input type="checkbox" name="enabled" ${n.enabled?'checked':''}><span><strong>课前提醒</strong><small>课程名、地点与开始时间</small></span></label>${field('提前多少分钟',input('minutes',n.minutes,'number','min="0" max="120" required'))}<label class="check-row"><input type="checkbox" name="ongoing" ${n.ongoing?'checked':''}><span><strong>课程状态通知</strong><small>上课 / 课间自动切换，当天结束后收起</small></span></label>${field('上课时的计时方式',select('statusMode',[['remaining','距离课间 / 下课'],['elapsed','累计授课时间（不含课间）']],n.statusMode||'remaining'))}<label class="check-row"><input type="checkbox" name="breakReminder" ${n.breakReminder?'checked':''}><span><strong>课间结束提醒</strong><small>同一堂课第二小节开始时，再提醒一次</small></span></label>${submit('保存提醒设置')}</form><div id="notification-permissions" class="helper-box ${st.granted&&st.exact?'':'warning-box'}">${window.Android?`通知权限：${st.granted?'已允许':'尚未允许'}<br>准时提醒：${st.exact?'已允许':'未授权，将使用可能延迟的系统调度'}${st.remindersAllowed===false?'<br>课前提醒频道未开启':''}${st.statusAllowed===false?'<br>课程状态频道未开启':''}`:'浏览器预览不发送系统通知，请在 Android App 中使用。'}</div>${window.Android?`<div class="permission-actions">${button('permission-notification','通知权限')}${button('permission-alarm','准时提醒权限')}${button('test-notification','发送测试通知')}</div>`:''}<p class="source-note">提醒跟随当前学期、调课及作息更新。Android 14 允许划掉状态通知；系统强行停止应用后，请重新打开以恢复计划。</p>`);
+  sheet('提醒与课程状态',`<form id="notification-form"><label class="check-row"><input type="checkbox" name="enabled" ${n.enabled?'checked':''}><span><strong>课前提醒</strong><small>课程名、地点与开始时间</small></span></label>${field('提前多少分钟',input('minutes',n.minutes,'number','min="0" max="120" required'))}<label class="check-row"><input type="checkbox" name="ongoing" ${n.ongoing?'checked':''}><span><strong>课程状态通知</strong><small>上课 / 课间自动切换，当天结束后收起</small></span></label>${field('上课时的计时方式',select('statusMode',[['remaining','距离课间 / 下课'],['elapsed','累计授课时间（不含课间）']],n.statusMode||'remaining'))}<label class="check-row"><input type="checkbox" name="breakReminder" ${n.breakReminder?'checked':''}><span><strong>课间结束提醒</strong><small>同一堂课第二小节开始时，再提醒一次</small></span></label>${submit('保存提醒设置')}</form><div id="notification-permissions" class="helper-box ${st.granted&&st.exact?'':'warning-box'}">${window.Android?`通知权限：${st.granted?'已允许':'尚未允许'}<br>准时提醒：${st.exact?'已允许':'未授权，将使用可能延迟的系统调度'}${st.remindersAllowed===false?'<br>课前提醒频道未开启':''}${st.statusAllowed===false?'<br>课程状态频道未开启':''}`:'浏览器预览不发送系统通知，请在 Android App 中使用。'}</div>${window.Android?`<div class="permission-actions">${button('permission-notification','通知权限')}${button('permission-alarm','准时提醒权限')}${button('test-notification','发送测试通知')}${button('background-settings','后台提醒与省电')}</div>`:''}<p class="source-note">提醒跟随当前学期、调课及作息更新。Android 14 允许划掉状态通知；系统强行停止应用后，请重新打开以恢复计划。</p>`);
 }
 function refreshPermissionRegion(){const el=document.querySelector('#notification-permissions');if(!el)return;const st=notificationStatus;el.classList.toggle('warning-box',!st.granted||!st.exact);el.innerHTML=window.Android?`通知权限：${st.granted?'已允许':'尚未允许'}<br>准时提醒：${st.exact?'已允许':'未授权，将使用可能延迟的系统调度'}${st.remindersAllowed===false?'<br>课前提醒频道未开启':''}${st.statusAllowed===false?'<br>课程状态频道未开启':''}`:'浏览器预览不发送系统通知，请在 Android App 中使用。';}
 function refreshNotificationStatus(){if(window.Android?.getNotificationStatus)try{notificationStatus=JSON.parse(Android.getNotificationStatus());refreshPermissionRegion();}catch{}}
@@ -144,12 +147,13 @@ management=createManagementUI(managerContext);exams=createExamUI(managerContext)
 updater=createUpdateUI();
 shareEntry=createShareEntry({openShare:entry=>sharing.openShare(entry),isOwnShare:entry=>sharing.isOwnShare(entry)});
 motion=installTimetableMotion({root:app,onNavigate:navigatePage});
+background=createBackgroundUI({onMessage:toast});
 document.addEventListener('click',async event=>{
   if(motion?.suppressClick()){event.preventDefault();return;}
   if(event.target.hasAttribute('data-backdrop')){goBack();return;}
   const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
   const {action,id}=el.dataset;
-  try{if(shareEntry.click(action,el)||await updater.click(action,el)||management.click(action,el)||exams.click(action,el)||await sharing.click(action,el))return;switch(action){
+  try{if(background.click(action,el)||shareEntry.click(action,el)||await updater.click(action,el)||management.click(action,el)||exams.click(action,el)||await sharing.click(action,el))return;switch(action){
     case 'close':returnToImport=false;closeSheet();break;
     case 'sheet-back':goBack();break;
     case 'tab':if(tab!==el.dataset.tab){tabHistory.push({tab,scroll:window.scrollY});if(tabHistory.length>20)tabHistory.shift();tab=el.dataset.tab;render();window.scrollTo(0,0);motion.animateTab();}break;
@@ -291,8 +295,10 @@ function returnToCurrentTimetable(){
 }
 window.onAppForeground=returnToCurrentTimetable;
 let wasHidden=document.hidden;
-document.addEventListener('visibilitychange',()=>{const returning=wasHidden&&!document.hidden;wasHidden=document.hidden;if(returning&&!window.Android)returnToCurrentTimetable();refreshClock();});window.addEventListener('focus',refreshClock);setInterval(refreshClock,30000);
+let dateTimer=null;
+function scheduleDateClock(){if(dateTimer!==null)clearTimeout(dateTimer);dateTimer=null;if(document.hidden)return;refreshClock();dateTimer=setTimeout(scheduleDateClock,30000);}
+document.addEventListener('visibilitychange',()=>{const returning=wasHidden&&!document.hidden;wasHidden=document.hidden;if(returning&&!window.Android)returnToCurrentTimetable();scheduleDateClock();});window.addEventListener('focus',scheduleDateClock);
 window.addEventListener('focus',()=>{refreshNotificationStatus();sharing.onForeground?.();shareEntry.foreground();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshNotificationStatus();sharing.onForeground?.();shareEntry.foreground();}});
-setInterval(()=>{if(!document.hidden){const modal=document.querySelector('#modal-root');refreshLive(modal.firstChild?modal:app);}},1000);
-render();syncNative();shareEntry.foreground();sharing.onForeground?.();
+const liveClock=createLiveClock({document,view:window,roots:[app,document.querySelector('#modal-root')],selectRoot:()=>{const modal=document.querySelector('#modal-root');return modal.firstChild?modal:app;},occurrences:()=>occurrenceMap,refresh:refreshLive});
+render();liveClock.wake();scheduleDateClock();syncNative();shareEntry.foreground();sharing.onForeground?.();

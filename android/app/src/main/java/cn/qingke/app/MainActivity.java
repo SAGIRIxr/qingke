@@ -301,6 +301,11 @@ public final class MainActivity extends Activity {
             if (client != null) client.request(requestId, action, baseUrl, payloadJson);
         }
         @JavascriptInterface public String getNotificationStatus() { return ScheduleNotifications.getStatus(MainActivity.this); }
+        @JavascriptInterface public String getBackgroundStatus() { return BackgroundSettings.status(MainActivity.this); }
+        @JavascriptInterface public void openBackgroundSettings(String action) { runOnUiThread(() -> {
+            if (entryDestroyed || isFinishing()) return;
+            if (!BackgroundSettings.open(MainActivity.this, action)) toast("无法打开此设置，请从系统的清课应用信息中检查后台权限");
+        }); }
         @JavascriptInterface public void syncSchedule(String json) {
             try {
                 ScheduleNotifications.sync(MainActivity.this, json);
@@ -398,10 +403,11 @@ public final class MainActivity extends Activity {
 
     private void openSettings(Intent intent) {
         try { startActivity(intent); }
-        catch (ActivityNotFoundException error) { toast("无法打开系统设置，请从应用信息中检查权限"); }
+        catch (ActivityNotFoundException | SecurityException error) { toast("无法打开系统设置，请从应用信息中检查权限"); }
     }
 
     private void dispatchNotificationStatus() { dispatch("onNotificationStatus", ScheduleNotifications.getStatus(this)); }
+    private void dispatchBackgroundStatus() { dispatch("onBackgroundStatus", BackgroundSettings.status(this)); }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -787,6 +793,7 @@ public final class MainActivity extends Activity {
         }
         ScheduleNotifications.refresh(this, false);
         dispatchNotificationStatus();
+        dispatchBackgroundStatus();
         if (updateClient != null) updateClient.resume();
     }
 
@@ -798,6 +805,7 @@ public final class MainActivity extends Activity {
         // Some vendor permission panels are overlays and do not pause/resume the Activity.
         if (hasFocus && appWeb != null) {
             dispatchNotificationStatus();
+            dispatchBackgroundStatus();
             if (updateClient != null) updateClient.resume();
         }
     }

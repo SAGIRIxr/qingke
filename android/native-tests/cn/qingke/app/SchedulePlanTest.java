@@ -54,6 +54,16 @@ public final class SchedulePlanTest {
         SchedulePlan alertOnly = new SchedulePlan(true, false, false, 10, List.of(event));
         check(alertOnly.stateAt(START) == null, "Alerts independently enabled without status");
         check(alertOnly.remindersDue(START + 55 * M, START + 55 * M).isEmpty(), "Break reminder defaults off");
+        check(alertOnly.nextAfter(START - 10 * M) == event.end,
+                "Alert-only mode sleeps until cleanup instead of waking again at class start");
+        check(alertOnly.points().size() == 2, "One alert and one cleanup boundary per alert-only lesson");
+        SchedulePlan alertWithBreak = new SchedulePlan(true, false, true, 10, List.of(event));
+        check(alertWithBreak.nextAfter(START - 10 * M) == START + 55 * M,
+                "Power saving keeps the requested optional break reminder");
+        check(alertWithBreak.nextAfter(START + 55 * M) == event.end,
+                "Alert-only break reminder is followed by cleanup without status wakeups");
+        check(plan.remindersDue(START - 10 * M, START, Set.of(sent)).isEmpty(),
+                "Reconciliation on resume cannot re-alert an already delivered reminder");
         SchedulePlan instant = new SchedulePlan(true, true, false, 0, List.of(event));
         check(instant.nextAfter(START - 1) == START, "Zero-minute reminder supported");
         SchedulePlan.Event later = course("2", START + 95 * M);
@@ -67,6 +77,12 @@ public final class SchedulePlanTest {
         for (int i = 0; i < 10000; i++) semester.add(course(Integer.toString(i), START + i * 120 * M));
         SchedulePlan large = new SchedulePlan(true, true, false, 10, semester);
         check(large.nextAfter(START + 9998 * 120 * M + 110 * M) == START + 9999 * 120 * M, "Large semester chooses correct remaining point");
+        semester.clear();
+        check(large.events.size() == 10000, "Caller cannot mutate a parsed plan after boundaries were computed");
+        List<SchedulePlan.Segment> mutableSegments = new ArrayList<>(event.segments);
+        SchedulePlan.Event copied = new SchedulePlan.Event("copied", "课程", "教室", event.start, event.end, mutableSegments);
+        mutableSegments.clear();
+        check(copied.segments.size() == 2, "Caller cannot mutate subsection boundaries used by the plan");
         check(new SchedulePlan(true, true, true, 10, List.of()).nextAfter(START) == 0, "Empty replacement clears scheduled events");
         System.out.println("PASS: " + checks + " native schedule checks");
     }

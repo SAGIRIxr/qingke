@@ -1,4 +1,6 @@
-import {occurrenceStatus} from './engine.js';
+import {localDate,occurrenceStatus} from './engine.js';
+
+export const UPCOMING_WINDOW_MS=30*60000;
 
 /** Whole-lesson progress counts teaching time only; it pauses during a real break. */
 export function courseLive(occurrence,now=Date.now(),nextIds=new Set()){
@@ -12,17 +14,18 @@ export function courseLive(occurrence,now=Date.now(),nextIds=new Set()){
   return {active,upcoming,phase:status.phase,progress,label,detail,aria:upcoming?detail:`${label}，授课进度 ${Math.round(progress)}%`};
 }
 
-/** Use all actual dated arrangements, never just the week currently on screen.
- * A break belongs to the ongoing lesson. Equal next start times all remain visible.
+/** Highlight the next actual arrangement today, only within 30 minutes of its start.
+ * An ongoing lesson or break does not suppress it. Equal next starts all remain visible.
  */
 export function nextOccurrenceIds(occurrences,now=Date.now()){
   const ms=now instanceof Date?now.getTime():Number(now);
   if(!Number.isFinite(ms))throw Error('课程状态时间无效');
+  const today=localDate(new Date(ms));
   let nextStart=Infinity;
   const ids=new Set();
   for(const item of occurrences){
-    if(item.startMs<=ms&&ms<item.endMs)return new Set();
-    if(item.startMs<=ms||!Number.isFinite(item.startMs)||item.endMs<=item.startMs)continue;
+    if(!Number.isFinite(item.startMs)||!Number.isFinite(item.endMs)||item.endMs<=item.startMs||item.startMs<=ms||item.startMs-ms>UPCOMING_WINDOW_MS)continue;
+    if(localDate(new Date(item.startMs))!==today)continue;
     if(item.startMs<nextStart){nextStart=item.startMs;ids.clear();}
     if(item.startMs===nextStart)ids.add(item.id);
   }

@@ -12,7 +12,7 @@
 .\scripts\build-android.ps1 -Offline
 ```
 
-首次配置其他电脑时去掉 `-Offline` 以下载构建依赖；可使用 `-SdkPath`、`-GradlePath` 参数指定 SDK 和 Gradle，也可使用环境变量与 PATH。脚本只构建，不会安装或操作手机。默认生成已签名的 `dist\qingke-3.3.0-release.apk`；本地开发可加 `-Configuration Debug`。正式构建须先配置下述私有签名。Gradle `preBuild` 会把 `www` 同步至生成的 `android/app/src/main/assets/www`，不要直接编辑该生成目录。
+首次配置其他电脑时去掉 `-Offline` 以下载构建依赖；可使用 `-SdkPath`、`-GradlePath` 参数指定 SDK 和 Gradle，也可使用环境变量与 PATH。脚本只构建，不会安装或操作手机。默认生成已签名的 `dist\qingke-3.3.1-release.apk`；本地开发可加 `-Configuration Debug`。正式构建须先配置下述私有签名。Gradle `preBuild` 会把 `www` 同步至生成的 `android/app/src/main/assets/www`，不要直接编辑该生成目录。
 
 项目路径含中文，因此配置了 `android.overridePathCheck=true`。当前 Windows 环境已通过资源及 Java 编译；若其他工具链无法处理该路径，可将整个项目复制至纯英文路径再构建。
 

@@ -13,6 +13,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.SystemClock;
+import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
@@ -80,15 +81,21 @@ final class ScheduleNotifications {
         JSONObject value = new JSONObject(json);
         SchedulePlan replacement = parse(value); // Validate before touching the saved plan.
         SharedPreferences prefs = preferences(context);
+        String normalized = value.toString(), zone = ZoneId.systemDefault().getId();
+        if (normalized.equals(prefs.getString("schedule", "")) && zone.equals(prefs.getString("zone", ""))) {
+            // Keep the due boundary and displayed alerts across an unchanged WebView sync.
+            // Refresh still restores a dismissed status card and any alarm removed by the OS.
+            refresh(context, false);
+            return;
+        }
         Set<String> remainingKeys = new HashSet<>();
         for (SchedulePlan.Point point : replacement.points()) if (point.type != SchedulePlan.STATE) remainingKeys.add(point.key());
         Set<String> delivered = new HashSet<>(prefs.getStringSet("delivered", Collections.emptySet()));
         delivered.retainAll(remainingKeys);
-        if (!prefs.edit().putString("schedule", value.toString()).putStringSet("delivered", delivered)
-                .putString("zone", ZoneId.systemDefault().getId()).remove("next").commit())
+        if (!prefs.edit().putString("schedule", normalized).putStringSet("delivered", delivered)
+                .putString("zone", zone).remove("next").commit())
             throw new JSONException("无法保存提醒计划");
-        cancelAlarm(context);
-        context.getSystemService(NotificationManager.class).cancelAll();
+        cancelNotifications(context);
         refresh(context, false);
     }
     private static SchedulePlan parse(JSONObject json) throws JSONException {
@@ -129,54 +136,87 @@ final class ScheduleNotifications {
                 json.optBoolean("breakReminder"), json.optInt("minutes", 10), events);
     }
     static synchronized void refresh(Context context, boolean dueToAlarm) {
-        createChannels(context);
         SharedPreferences prefs = preferences(context);
+        JSONObject json;
+        SchedulePlan plan;
         try {
-            JSONObject json = new JSONObject(prefs.getString("schedule", "{}"));
+            json = new JSONObject(prefs.getString("schedule", "{}"));
             adjustTimezone(json, prefs);
-            SchedulePlan plan = parse(json);
-            long now = System.currentTimeMillis(), scheduledAt = prefs.getLong("next", 0);
+            plan = parse(json);
+        } catch (JSONException | IllegalArgumentException error) {
             cancelAlarm(context);
             prefs.edit().remove("next").commit();
-            NotificationManager manager = context.getSystemService(NotificationManager.class);
-            if ((!plan.enabled && !plan.ongoing) || !granted(context)) {
-                manager.cancelAll();
-                return;
+            cancelNotifications(context);
+            Log.w("QingkeSchedule", "Invalid local notification plan; waiting for next sync");
+            return;
+        }
+        long now = System.currentTimeMillis(), scheduledAt = prefs.getLong("next", 0);
+        if ((!plan.enabled && !plan.ongoing) || !granted(context)) {
+            cancelAlarm(context);
+            prefs.edit().remove("next").commit();
+            cancelNotifications(context);
+            return;
+        }
+        // Capture due work before replacing the boundary. Always arm the next node FIRST:
+        // a vendor notification/RemoteViews failure must not break the rest of the semester.
+        Set<String> delivered = new HashSet<>(prefs.getStringSet("delivered", Collections.emptySet()));
+        List<SchedulePlan.Point> due = plan.remindersDue(scheduledAt, now, delivered);
+        scheduleNext(context, prefs, plan.nextAfter(now));
+        try { createChannels(context); }
+        catch (RuntimeException error) { Log.w("QingkeSchedule", "Notification channels unavailable; next alarm preserved"); }
+        if (!due.isEmpty()) {
+            for (SchedulePlan.Point point : due) delivered.add(point.key());
+            // Persist before sending: duplicate broadcasts, a reboot or moving the clock back
+            // must not produce a second alert for the same occurrence.
+            if (prefs.edit().putStringSet("delivered", delivered).commit()) {
+                for (SchedulePlan.Point point : due) {
+                    try { showReminder(context, point, now); }
+                    catch (RuntimeException error) { Log.w("QingkeSchedule", "Cannot display reminder; next alarm preserved"); }
+                }
             }
-            // Activity resume can race the due alarm. Consume the saved due boundary here too;
-            // replacements explicitly clear it, so canceled/edited schedules cannot alert.
-            Set<String> delivered = new HashSet<>(prefs.getStringSet("delivered", Collections.emptySet()));
-            List<SchedulePlan.Point> due = plan.remindersDue(scheduledAt, now, delivered);
-            if (!due.isEmpty()) {
-                for (SchedulePlan.Point point : due) delivered.add(point.key());
-                // Persist before sending: duplicate broadcasts, a reboot or moving the clock back
-                // must not produce a second alert for the same occurrence.
-                if (prefs.edit().putStringSet("delivered", delivered).commit())
-                    for (SchedulePlan.Point point : due) showReminder(context, point, now);
-            }
-            // Remove alerts as soon as their course ends, even if the status feature is disabled.
-            for (SchedulePlan.Event event : plan.events) if (event.end <= now) manager.cancel(event.id, REMINDER_ID);
+        }
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        try {
+            // Only cancel notifications that actually exist, instead of thousands of binder
+            // calls for every historical course each time a single boundary is crossed.
+            Set<String> liveEvents = new HashSet<>();
+            for (SchedulePlan.Event event : plan.events) if (event.end > now) liveEvents.add(event.id);
+            for (StatusBarNotification notification : manager.getActiveNotifications())
+                if (notification.getId() == REMINDER_ID && !liveEvents.contains(notification.getTag()))
+                    manager.cancel(notification.getTag(), REMINDER_ID);
+        } catch (RuntimeException error) { Log.w("QingkeSchedule", "Cannot clear expired reminders; next alarm preserved"); }
+        try {
             SchedulePlan.State current = plan.stateAt(now);
             if (current == null) manager.cancel(STATUS_ID);
             else showStatus(context, current, now, "elapsed".equals(json.optString("statusMode")));
-            long next = plan.nextAfter(now);
-            if (next > 0) {
-                prefs.edit().putLong("next", next).commit();
-                AlarmManager alarms = context.getSystemService(AlarmManager.class);
-                PendingIntent operation = alarmIntent(context, PendingIntent.FLAG_UPDATE_CURRENT);
-                try {
-                    if (exact(context)) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
-                    else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
-                } catch (SecurityException error) {
-                    // Permission may have changed between checking it and scheduling.
-                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
-                }
-            }
-        } catch (JSONException | IllegalArgumentException error) {
+        } catch (RuntimeException error) { Log.w("QingkeSchedule", "Cannot display status; next alarm preserved"); }
+    }
+    private static void scheduleNext(Context context, SharedPreferences prefs, long next) {
+        if (next <= 0) {
             cancelAlarm(context);
-            context.getSystemService(NotificationManager.class).cancelAll();
-            Log.w("QingkeSchedule", "Invalid local notification plan; waiting for next sync");
+            prefs.edit().remove("next").commit();
+            return;
         }
+        AlarmManager alarms = context.getSystemService(AlarmManager.class);
+        PendingIntent operation = alarmIntent(context, PendingIntent.FLAG_UPDATE_CURRENT);
+        try {
+            try {
+                if (exact(context)) alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
+                else alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
+            } catch (SecurityException error) {
+                // Permission may have changed between checking it and scheduling.
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, operation);
+            }
+            // The same PendingIntent replaces its old alarm without a cancel/recreate gap.
+            if (!prefs.edit().putLong("next", next).commit())
+                Log.w("QingkeSchedule", "Next alarm set but boundary could not be saved");
+        } catch (RuntimeException error) {
+            Log.w("QingkeSchedule", "System rejected next alarm; retry on next resume or system broadcast");
+        }
+    }
+    private static void cancelNotifications(Context context) {
+        try { context.getSystemService(NotificationManager.class).cancelAll(); }
+        catch (RuntimeException error) { Log.w("QingkeSchedule", "Cannot clear notifications"); }
     }
     private static void adjustTimezone(JSONObject json, SharedPreferences prefs) throws JSONException {
         String current = ZoneId.systemDefault().getId(), stored = prefs.getString("zone", current);
