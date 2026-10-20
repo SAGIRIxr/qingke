@@ -1,6 +1,7 @@
 import { getWeek } from './core.js';
 import { uid, localDate, addDays, createState, validateState, getProfile, occurrencesOn, notificationEvents, dateForWeekday } from './engine.js';
 import { esc, clone, icon, DAYS, button, select, field, input, sheet, submit as submitButton } from './ui.js';
+import { builtinHoliday } from './holidays.js';
 
 const weekday = date => new Date(`${date}T12:00:00`).getDay() || 7;
 const valuesOf = form => Object.fromEntries(new FormData(form));
@@ -113,7 +114,7 @@ export function createCalendarUI(ctx) {
     const s = semester();
     return `<div class="month-nav">${button('calendar-month-prev', icon('left', 18), 'calendar-arrow', 'aria-label="上个月"')}<strong>${year} 年 ${number} 月</strong>${button('calendar-month-next', icon('right', 18), 'calendar-arrow', 'aria-label="下个月"')}</div><div class="month-calendar calendar-v4-grid">${DAYS.map(d => `<span class="month-weekday">${d}</span>`).join('')}${Array.from({ length: offset }, () => '<span aria-hidden="true"></span>').join('')}${Array.from({ length: days }, (_, i) => {
       const date = `${month}-${String(i + 1).padStart(2, '0')}`, rule = s.dayRules.find(r => r.date === date), holiday = s.holidayLabels.find(h => h.date === date), count = occurrencesOn(s, date).length;
-      const tag = rule ? rule.type === 'off' ? '停课' : '补课' : holiday?.name || (count ? `${count} 次` : '');
+      const tag = rule ? rule.type === 'off' ? '停课' : '补课' : holiday?.name || builtinHoliday(date)?.name || (count ? `${count} 次` : '');
       return button('calendar-pick', `<span>${i + 1}</span><small>${esc(tag)}</small>`, `month-day calendar-v4-day ${chosen.includes(date) ? 'selected' : ''} ${date === localDate() ? 'is-today' : ''}`, `data-date="${date}" aria-pressed="${chosen.includes(date)}" aria-label="${date}${tag ? ` ${esc(tag)}` : ''}"`);
     }).join('')}</div>`;
   }

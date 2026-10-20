@@ -3,7 +3,25 @@ import { assessmentValuesFromText, isAssessmentMetadata } from './import-metadat
 
 const DAY_NAMES = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
 const CHINESE_NUMBERS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
+// The timetable supports 24 periods per day; imports must not stop at the old 12-period grid.
+const MAX_PERIODS = 24;
 const FIELD_END = '(?=\\s*(?:课程名称|课程名|课程性质|课程类别|星期|周次|节次|教师|老师|教室|地点|任课教师|上课地点|考核方式|考核方法|考核形式|考核类别|考核类型|考核|备注)\\s*[:：]|[\\n|｜;；]|$)';
+
+// Old Zhengfang cells write parity after a bar: “{第1-16周|单周}”. Keep it attached
+// to its range; otherwise the bar splits the field and the course becomes weekly.
+function legacyParity(value) {
+  return value.replace(/周\s*[|｜]\s*([单双])\s*周?/g, '周($1)');
+}
+
+/** Old Zhengfang cells list name, “周一第1,2节{第1-16周}”, teacher and room without labels. */
+function legacyPeople(source) {
+  const lines = source.split('\n').map(cleanText).filter(Boolean);
+  const index = lines.findIndex(line => /\{[^}]*\d[^}]*周[^}]*\}/.test(line));
+  if (index < 0) return {};
+  const plain = line => line && !/[:：]/.test(line) && !isAssessmentMetadata(line) && !dayFromText(line) && !periodsFromText(line) && !/\d\s*周/.test(line);
+  const [teacher, location] = lines.slice(index + 1, index + 3);
+  return { teacher: plain(teacher) ? teacher : '', location: plain(location) ? location : '' };
+}
 
 function cleanText(value) {
   return String(value ?? '').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n').replace(/[\t ]+/g, ' ').trim();
@@ -29,12 +47,20 @@ function periodsFromText(value, allowBare = false) {
     if (chinese && CHINESE_NUMBERS[chinese[1]]) return [CHINESE_NUMBERS[chinese[1]], CHINESE_NUMBERS[chinese[1]]];
     return null;
   }
-  const range = match[1].match(/^(\d{1,2})(?:\s*([-,，])\s*(\d{1,2}))?$/);
-  if (!range) return null;
-  const start = Number(range[1]);
-  const end = Number(range[3] ?? range[1]);
-  const noncontiguous = /[,，]/.test(range[2] ?? '') && end !== start + 1;
-  return !noncontiguous && start >= 1 && end >= start && end <= 12 ? [start, end] : null;
+  return periodRange(match[1]);
+}
+
+/** “3-5” or a consecutive list such as “3,4,5”; a gap or reversed list is not one lesson. */
+function periodRange(expression) {
+  const range = expression.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+  if (range) {
+    const start = Number(range[1]), end = Number(range[2]);
+    return start >= 1 && end >= start && end <= MAX_PERIODS ? [start, end] : null;
+  }
+  if (!/^\d{1,2}(?:\s*[,，]\s*\d{1,2})*$/.test(expression)) return null;
+  const numbers = expression.split(/\s*[,，]\s*/).map(Number);
+  if (numbers.some((value, index) => index && value !== numbers[index - 1] + 1)) return null;
+  return numbers[0] >= 1 && numbers.at(-1) <= MAX_PERIODS ? [numbers[0], numbers.at(-1)] : null;
 }
 
 function labeledValue(text, labels) {
@@ -166,9 +192,9 @@ function parseBlock(text, context, totalWeeks, fields = {}) {
   if (!periods) missing.push('节次');
   if (!weeks.length) missing.push('周次');
   if (missing.length) return { warning: `${name ? `“${name.slice(0, 35)}”` : '一条课程'}缺少可识别的${missing.join('、')}，已跳过，请手动补充。` };
-  const positional = source.split(/[|｜\t]/).map(cleanText);
-  const teacher = fields.teacher || labeledValue(source, '任课教师|教师|老师') || (!fields.columnLayout && positional.length >= 6 ? positional[4] : '');
-  const location = fields.location || labeledValue(source, '上课地点|教室|地点') || (!fields.columnLayout && positional.length >= 6 ? positional[5] : '');
+  const positional = source.split(/[|｜\t]/).map(cleanText), legacy = legacyPeople(source);
+  const teacher = fields.teacher || labeledValue(source, '任课教师|教师|老师') || (!fields.columnLayout && positional.length >= 6 ? positional[4] : '') || legacy.teacher || '';
+  const location = fields.location || labeledValue(source, '上课地点|教室|地点') || (!fields.columnLayout && positional.length >= 6 ? positional[5] : '') || legacy.location || '';
   // Do not interpret a course name or a teacher/room called “考试” as metadata.
   const metadataText = source.replace(new RegExp(`(?:课程名称|课程名|课程)\\s*[:：]\\s*.*?${FIELD_END}`, 'g'), '')
     .split(/[\n|｜]/).map(cleanText).filter(part => ![name, teacher, location].includes(part)).join('\n');
@@ -204,7 +230,7 @@ function parseHtml(html, totalWeeks, add, warnings) {
       const fullText = elementText(block);
       const explicitPeriods = periodsFromText(fields.periods) ?? periodsFromText(fullText);
       const declaredSpan = Number(cell.getAttribute('rowspan') ?? 0);
-      const periods = explicitPeriods ?? (declaredSpan > 0 && period + declaredSpan - 1 <= 12 ? [period, period + declaredSpan - 1] : null);
+      const periods = explicitPeriods ?? (declaredSpan > 0 && period + declaredSpan - 1 <= MAX_PERIODS ? [period, period + declaredSpan - 1] : null);
       add(parseBlock(fullText, { day: Number(coordinate[1]), periods }, totalWeeks, fields));
     }
   }
@@ -348,7 +374,7 @@ export function parseSchedule(input, totalWeeks = 20) {
       if (existing.conflict && warnings.length < 80) warnings.push(`“${course.name.slice(0, 35)}”的重复记录包含冲突的考核方式，已保留为未设置，请在预览中核对。`);
     }
   };
-  const text = cleanText(typeof data.text === 'string' ? data.text.replace(/\t/g, ' | ') : data.text);
+  const text = legacyParity(cleanText(typeof data.text === 'string' ? data.text.replace(/\t/g, ' | ') : data.text));
   if (text.length > 2_000_000 || String(data.html ?? '').length > 2_000_000) return { courses, warnings: ['导入内容超过 2 MB，请只导入课程表页面。'], source };
   if (text && /^[\[{]/.test(text)) {
     try {
@@ -370,7 +396,7 @@ export function parseSchedule(input, totalWeeks = 20) {
     }
   }
   if (data.html) {
-    try { parseHtml(String(data.html), totalWeeks, add, warnings); }
+    try { parseHtml(legacyParity(String(data.html)), totalWeeks, add, warnings); }
     catch { warnings.push('网页结构解析失败，请改为粘贴含星期、节次、周次的课程文本。'); }
   }
   if (!courses.length && text) parseText(text, totalWeeks, add);

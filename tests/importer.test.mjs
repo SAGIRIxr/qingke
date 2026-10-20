@@ -167,8 +167,12 @@ test('未知多位节次编码不能被截取后两位导入', () => {
   assert.match(result.warnings.join(''), /节次/);
 });
 
-test('超长数字及多项节次列表不能被截取尾部导入', () => {
-  for (const period of ['第101节', '1,2,3节', '1, 2, 3节', '节次：101']) {
+test('连续节次列表整体识别，超长数字和不连续列表不能被截取尾部导入', () => {
+  for (const period of ['1,2,3节', '1, 2, 3节', '第1，2，3节']) {
+    const result = parseSchedule({ text: `高等数学\n周一 ${period} 第1-16周` });
+    assert.deepEqual([result.courses[0]?.startPeriod, result.courses[0]?.endPeriod], [1, 3], period);
+  }
+  for (const period of ['第101节', '1,3节', '3,2节', '节次：101', '第25节']) {
     const result = parseSchedule({ text: `高等数学\n周一 ${period} 第1-16周` });
     assert.equal(result.courses.length, 0, period);
     assert.match(result.warnings.join(''), /节次/);
@@ -203,4 +207,17 @@ test('内容和学期范围的边界检查', () => {
   assert.equal(parseSchedule(null).courses.length, 0);
   assert.match(parseSchedule({ text: 'a'.repeat(2_000_001) }).warnings[0], /2 MB/);
   assert.match(parseSchedule({ text: '课程' }, 0).warnings[0], /学期周数/);
+});
+
+test('旧版正方 {第1-16周|单周} 保留单双周，并按行读出教师与教室', () => {
+  const result = parseSchedule({ text: '大学物理\n周三第1,2节{第1-16周|单周}\n李四\nB202\n\n物理实验\n周四第3,4,5节{第2-16周|双周}\n王五\n实验楼301' });
+  assert.deepEqual(result.courses.map(c => [c.name, c.day, c.startPeriod, c.endPeriod, c.weeks, c.teacher, c.location]), [
+    ['大学物理', 3, 1, 2, [1, 3, 5, 7, 9, 11, 13, 15], '李四', 'B202'],
+    ['物理实验', 4, 3, 5, [2, 4, 6, 8, 10, 12, 14, 16], '王五', '实验楼301'],
+  ]);
+});
+
+test('第 12 节以后的课程照常识别，最多 24 节', () => {
+  const result = parseSchedule({ text: '晚间选修\n周三 第11-13节 第1-16周\n\n夜课\n周五 第13-14节 第1-8周' });
+  assert.deepEqual(result.courses.map(c => [c.name, c.startPeriod, c.endPeriod]), [['晚间选修', 11, 13], ['夜课', 13, 14]]);
 });

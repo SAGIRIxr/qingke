@@ -3,20 +3,49 @@ import {courseLive,axisDate} from './course-live.js';
 import {esc,icon,button} from './ui.js';
 import {conflictGroups,arrangementOrigin,conflictSummary} from './conflict-ui.js';
 import {fitCourseCardText} from './course-card-fit.js';
+import {appVersion} from './version.js';
 
 export const liveMarkup=id=>`<span class="course-live-label" data-live-label hidden></span><span class="course-progress" role="progressbar" aria-label="授课进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><i></i></span>`;
 const shortPlace=value=>value.replace(/^.*?校区\s*/,'').trim()||value||'地点待定';
 
+const clockMinutes=value=>Number(value.slice(0,2))*60+Number(value.slice(3));
+/** Boundaries after period n (1-based) that separate 大节: every change of morning/afternoon/evening,
+ * plus breaks longer than the group's ordinary one. A group with equal breaks pairs periods (1-2, 3-4). */
+export function majorBoundaries(periods){
+  const major=new Set();let first=0;
+  for(let i=1;i<=periods.length;i++){
+    if(i<periods.length&&periods[i].group===periods[first].group)continue;
+    if(i<periods.length)major.add(i);
+    const gaps=[];for(let k=first+1;k<i;k++)gaps.push(clockMinutes(periods[k].start)-clockMinutes(periods[k-1].end));
+    const shortest=Math.min(...gaps),uniform=gaps.every(gap=>gap===shortest);
+    gaps.forEach((gap,j)=>{if(uniform?j%2===1:gap>shortest)major.add(first+j+1);});
+    first=i;
+  }
+  return major;
+}
+/** Grid rules: 大节 boundaries always; a boundary inside a 大节 only where some visible card starts or ends. */
+export function gridLines(periods,maxPeriods,cards){
+  const major=majorBoundaries(periods),edges=new Set(cards.flatMap(c=>[c.startPeriod-1,c.endPeriod]));
+  return Array.from({length:Math.max(0,maxPeriods-1)},(_,i)=>i+1).filter(b=>major.has(b)||edges.has(b));
+}
+// Long cards keep a faint rule at a 大节 break they cross, so 1–4 still reads as two blocks.
+function cardDividers(semester,c){
+  if(c.breakMode==='continuous'||c.endPeriod-c.startPeriod<1)return '';
+  const major=majorBoundaries(getProfile(semester,c.date).periods);
+  return c.segments.slice(1).filter((s,i)=>major.has(s.period-1)&&s.startMs>c.segments[i].endMs).map(s=>`<i class="block-divider" aria-hidden="true" style="--rows-above:${s.period-c.startPeriod}"></i>`).join('');
+}
+
 export function renderCourseGrid({semester,dates,groups,maxPeriods}){
   const reference=axisDate(dates,localDate()),profile=getProfile(semester,reference),mixed=dates.some(d=>getProfile(semester,d).id!==profile.id);
   const caption=mixed?`<div class="axis-reference"><span>左侧时间：${esc(profile.name)} · ${Number(reference.slice(5,7))}/${Number(reference.slice(8))}</span>${button('axis-help','查看各日作息','text-button')}</div>`:'';
-  return `${caption}<div class="timetable" style="--days:${dates.length};--periods:${maxPeriods};grid-template-rows:repeat(${maxPeriods},var(--row-height))">${Array.from({length:maxPeriods},(_,i)=>`<div class="period-label" style="grid-row:${i+1}"><strong>${String(i+1).padStart(2,'0')}</strong><time>${profile.periods[i]?.start||'—'}</time><small>${profile.periods[i]?.end||''}</small></div>`).join('')}${groups.map((items,day)=>{
+  const lines=gridLines(profile.periods,maxPeriods,groups.flat().filter(c=>c.kind!=='exam'));
+  return `${caption}<div class="timetable" style="--days:${dates.length};--periods:${maxPeriods};grid-template-rows:repeat(${maxPeriods},var(--row-height))">${lines.map(b=>`<i class="row-line" aria-hidden="true" style="grid-row:${b+1}"></i>`).join('')}${Array.from({length:maxPeriods},(_,i)=>`<div class="period-label" style="grid-row:${i+1}"><strong>${String(i+1).padStart(2,'0')}</strong><time>${profile.periods[i]?.start||'—'}</time><small>${profile.periods[i]?.end||''}</small></div>`).join('')}${groups.map((items,day)=>{
     // The exam strip stays separate, but its actual times participate in grouping.
     const exams=(semester.exams||[]).some(e=>e.date===dates[day])?occurrencesOn(semester,dates[day]).filter(o=>o.kind==='exam'):[];
     const overlaps=conflictGroups([...items,...exams]).filter(g=>g.courses.length),covered=new Set(overlaps.flatMap(g=>g.courses.map(c=>c.id)));
     const ordinary=items.filter(c=>!covered.has(c.id)).map(c=>{
       const span=c.endPeriod-c.startPeriod+1,different=mixed&&getProfile(semester,dates[day]).id!==profile.id;
-      return `<button class="course-block c${c.color}" data-action="detail" data-id="${esc(c.id)}" data-live-id="${esc(c.id)}" data-period-span="${span}" style="grid-column:${day+2};grid-row:${c.startPeriod}/span ${span}" aria-label="${esc(c.name)}，${esc(c.location)}，${c.startPeriod}到${c.endPeriod}节"><div class="course-main"><strong>${esc(c.shortName||c.name.replace(/[★☆]+$/u,'').trim())}</strong><span class="room-label">${esc(shortPlace(c.location))}</span>${different?`<small class="actual-time">${c.segments[0].start}<br>${c.segments.at(-1).end}</small>`:''}</div>${c.changeLabel||(c.assessment&&c.assessment!=='未设置')?`<div class="course-meta">${c.assessment&&c.assessment!=='未设置'?`<small class="assessment">${esc(c.assessment)}</small>`:''}${c.changeLabel?`<small class="change-mark" title="${esc(c.changeLabel)}" aria-label="${esc(c.changeLabel)}">调</small>`:''}</div>`:''}${liveMarkup(c.id)}</button>`;
+      return `<button class="course-block c${c.color}" data-action="detail" data-id="${esc(c.id)}" data-live-id="${esc(c.id)}" data-period-span="${span}" style="grid-column:${day+2};grid-row:${c.startPeriod}/span ${span}" aria-label="${esc(c.name)}，${esc(c.location)}，${c.startPeriod}到${c.endPeriod}节"><div class="course-main"><strong>${esc(c.shortName||c.name.replace(/[★☆]+$/u,'').trim())}</strong><span class="room-label">${esc(shortPlace(c.location))}</span>${different?`<small class="actual-time">${c.segments[0].start}<br>${c.segments.at(-1).end}</small>`:''}</div>${c.changeLabel||(c.assessment&&c.assessment!=='未设置')?`<div class="course-meta">${c.assessment&&c.assessment!=='未设置'?`<small class="assessment">${esc(c.assessment)}</small>`:''}${c.changeLabel?`<small class="change-mark" title="${esc(c.changeLabel)}" aria-label="${esc(c.changeLabel)}">调</small>`:''}</div>`:''}${cardDividers(semester,c)}${liveMarkup(c.id)}</button>`;
     }).join('');
     return ordinary+overlaps.map(group=>conflictCard(semester,group,day)).join('');
   }).join('')}</div>`;
@@ -52,7 +81,7 @@ export function refreshCourseProgress(root,occurrences,now=Date.now(),nextIds=ne
 
 const row=(action,i,title,description,trailing='')=>`<button class="setting-row" data-action="${action}"><span class="setting-icon">${icon(i)}</span><span class="row-text"><strong>${title}</strong><small>${description}</small></span>${trailing||icon('right',15)}</button>`;
 const group=(name,content)=>`<section class="settings-section"><h2>${name}</h2><div class="setting-group">${content}</div></section>`;
-export function renderSettingsPage(state,version='3.3.2'){
+export function renderSettingsPage(state,version=appVersion()){
   const s=state.semesters.find(s=>s.id===state.activeSemesterId);
   return `<div class="section-heading"><h1>设置</h1></div>${group('课程与考试',row('import','school','导入课程','正方教务 / PDF / 文字')+row('all-courses','grid','管理课程',`${s.courses.length} 门课程 · 添加、编辑和删除`)+row('exams','note','考试安排',`${s.exams.length} 场 · 独立日期与考场`))}${group('学期与校历',row('semesters','calendar','学期管理',`${esc(s.name)} · 切换、编辑和删除`)+row('profiles','clock','上课作息',`${s.profiles.length} 套 · 夏冬切换与分时段联动`)+row('calendar','swap','调休与调课','勾选日期停补课 / 移动某一次课程'))}${group('提醒与显示',row('notifications','bell','提醒与课程状态',state.preferences.notifications.enabled?'课前提醒已开启 · 计时方式与权限':'提醒时间、课间提醒和通知权限')+row('background-settings','bell','后台提醒与省电','自启动、后台耗电限制与提醒排查')+row('toggle-weekend','grid','周视图显示周末','开启后显示周六和周日',`<span class="switch ${s.showWeekend?'on':''}" role="switch" aria-checked="${s.showWeekend}"></span>`))}${group('分享与数据',row('share-home','swap','分享与跟随','口令分享、导入朋友课表及同步状态')+row('backup-menu','download','备份与恢复','导出文件、恢复备份和历史版本'))}${group('应用',row('app-update','download','检查更新',`当前版本 ${version} · GitHub 更新与代理`))}<div class="about-mark"><img src="./icon.svg" alt="清课图标"><p>清课 ${version}</p></div>`;
 }

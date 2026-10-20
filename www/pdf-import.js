@@ -143,7 +143,7 @@ export function parsePdfTextPages(pages,{totalWeeks=20,name='课表 PDF'}={}) {
       const lastEdge=centers.at(-1)+gaps.at(-1)/2;
       const periodLabels=linesOf(items.filter(item=>item.x+item.width<=firstEdge+2&&item.y>header.y+header.height&&item.y<nextY))
         .map(line=>({...line,match:line.text.replace(/\s/g,'').match(/^第?(\d{1,2})(?:[-—–~～至](\d{1,2}))?节?$/)}))
-        .filter(line=>line.match&&Number(line.match[1])>=1&&Number(line.match[2]??line.match[1])<=12);
+        .filter(line=>line.match&&Number(line.match[1])>=1&&Number(line.match[2]??line.match[1])<=24);
       header.columns.forEach((column,columnIndex)=>{
         const left=columnIndex?(centers[columnIndex-1]+centers[columnIndex])/2:firstEdge;
         const right=columnIndex===centers.length-1?lastEdge:(centers[columnIndex]+centers[columnIndex+1])/2;

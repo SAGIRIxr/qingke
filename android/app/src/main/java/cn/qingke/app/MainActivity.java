@@ -50,6 +50,9 @@ import org.json.JSONTokener;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.file.Files;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -631,12 +634,30 @@ public final class MainActivity extends Activity {
         // Export preserves the exact stored text, including malformed JSON, so damaged data can be recovered later.
         // Only the restore path validates JSON before handing it to the timetable.
         pendingBackup = json;
+        // The system may kill this Activity while the document picker is open. Keep a private
+        // copy so the chosen file is still written after recreation instead of silently staying empty.
+        try (OutputStream stream = new FileOutputStream(pendingBackupFile())) { stream.write(json.getBytes(StandardCharsets.UTF_8)); }
+        catch (IOException error) { pendingBackupFile().delete(); }
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/json");
         intent.putExtra(Intent.EXTRA_TITLE, "清课备份-" + new SimpleDateFormat("yyyyMMdd-HHmm", Locale.CHINA).format(new Date()) + ".json");
         try { documentRequest = EXPORT_BACKUP; startActivityForResult(intent, EXPORT_BACKUP); }
-        catch (ActivityNotFoundException error) { documentRequest = 0; pendingBackup = null; toast("未找到文件管理器"); }
+        catch (ActivityNotFoundException error) { documentRequest = 0; pendingBackup = null; pendingBackupFile().delete(); toast("未找到文件管理器"); }
+    }
+
+    private File pendingBackupFile() { return new File(getCacheDir(), "pending-backup.json"); }
+
+    private String takePendingBackup() {
+        String backup = pendingBackup;
+        pendingBackup = null;
+        File file = pendingBackupFile();
+        if (backup == null && file.isFile() && file.length() <= MAX_BACKUP_BYTES) {
+            try { backup = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8); }
+            catch (IOException ignored) { backup = null; }
+        }
+        file.delete();
+        return backup;
     }
 
     private void chooseBackupSource() {
@@ -667,13 +688,13 @@ public final class MainActivity extends Activity {
         }
         if (requestCode == EXPORT_BACKUP || requestCode == IMPORT_BACKUP || requestCode == IMPORT_PDF) documentRequest = 0;
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
-            if (requestCode == EXPORT_BACKUP) pendingBackup = null;
+            if (requestCode == EXPORT_BACKUP) takePendingBackup();
             return;
         }
         Uri uri = data.getData();
-        if (requestCode == EXPORT_BACKUP && pendingBackup != null) {
-            final String backup = pendingBackup;
-            pendingBackup = null;
+        if (requestCode == EXPORT_BACKUP) {
+            final String backup = takePendingBackup();
+            if (backup == null) { toast("备份内容已失效，请重新导出"); return; }
             new Thread(() -> {
                 try (OutputStream stream = getContentResolver().openOutputStream(uri, "wt")) {
                     if (stream == null) throw new IOException("No output stream");
