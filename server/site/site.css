@@ -264,9 +264,9 @@ button:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radi
 .blobs{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;-webkit-mask-image:linear-gradient(#000 55%,transparent 98%);mask-image:linear-gradient(#000 55%,transparent 98%)}
 .hero-notice{transition:opacity .35s var(--ease),transform .45s var(--ease)}
 .hero-visual.sheet-shown .hero-notice{opacity:0;transform:translateY(12px) scale(.96);pointer-events:none}
-.blobs i{position:absolute;border-radius:50%;opacity:.7;background:radial-gradient(closest-side,var(--c),transparent);will-change:transform;animation:drift 22s ease-in-out infinite alternate}
-.blobs .b1{width:520px;height:520px;left:50%;top:40%;margin-left:-560px;--c:#daf3a3}
-.blobs .b2{width:460px;height:460px;left:50%;top:52%;margin-left:80px;--c:#f1d79c;animation-duration:26s;animation-delay:-8s}
+.blobs i{position:absolute;border-radius:50%;opacity:.55;background:radial-gradient(closest-side,var(--c),transparent);will-change:transform;animation:drift 22s ease-in-out infinite alternate}
+.blobs .b1{width:540px;height:540px;left:50%;top:44%;margin-left:-440px;--c:#dbe8c4}
+.blobs .b2{width:480px;height:480px;left:50%;top:52%;margin-left:-60px;--c:#f0ddb4;animation-duration:26s;animation-delay:-8s}
 .blobs .b3{width:380px;height:380px;left:50%;top:72%;margin-left:-180px;--c:#b9dcc6;animation-duration:30s;animation-delay:-14s}
 .paused i{animation-play-state:paused!important}
 @keyframes drift{0%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(60px,-40px,0) scale(1.12)}100%{transform:translate3d(-50px,30px,0) scale(.94)}}
@@ -374,8 +374,8 @@ button.mini-btn:active{transform:scale(.95)}
 .download .pill:hover:after{transform:translateX(560%) skewX(-18deg)}
 
 @media (max-width:600px){
-  .blobs .b1{width:360px;height:360px;margin-left:-300px}
-  .blobs .b2{width:320px;height:320px;margin-left:0}
+  .blobs .b1{width:300px;height:300px;top:50%;margin-left:-190px}
+  .blobs .b2{width:280px;height:280px;top:60%;margin-left:-90px}
   .blobs .b3{display:none}
   .aurora .a1{width:420px;height:420px}
   .aurora .a2{width:360px;height:360px}
