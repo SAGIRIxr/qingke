@@ -132,6 +132,7 @@
 /* ---------- Buttons and fields ---------- */
 .platform-ios .primary,.platform-ios .secondary,.platform-ios .danger{border-radius:999px;min-height:50px;font-size:16px;font-weight:600;border:0;padding:0 20px}
 .platform-ios .empty-actions .secondary{min-height:44px;font-size:15px}
+.platform-ios .sheet-actions>.primary,.platform-ios .sheet-actions>.secondary,.platform-ios .sheet-actions>.danger{font-size:15px;padding:0 12px;white-space:nowrap}
 .platform-ios .primary{background:var(--tint);color:#fff;box-shadow:0 6px 18px #1f5c4833}
 .platform-ios .secondary{background:var(--tint-soft);color:var(--tint)}
 .platform-ios .danger{background:#ff3b301a;color:#ff3b30}
