@@ -1,6 +1,7 @@
 import {localDate,occurrenceStatus} from './engine.js';
 
 export const UPCOMING_WINDOW_MS=30*60000;
+export const upcomingFrom=item=>Number.isFinite(item.remindAt)?item.remindAt:item.startMs-UPCOMING_WINDOW_MS;
 
 /** Whole-lesson progress counts teaching time only; it pauses during a real break. */
 export function courseLive(occurrence,now=Date.now(),nextIds=new Set()){
@@ -14,7 +15,8 @@ export function courseLive(occurrence,now=Date.now(),nextIds=new Set()){
   return {active,upcoming,phase:status.phase,progress,label,detail,aria:upcoming?detail:`${label}，授课进度 ${Math.round(progress)}%`};
 }
 
-/** Highlight the next actual arrangement today, only within 30 minutes of its start.
+/** Highlight the next actual arrangement today once its reminder time (`remindAt`, see engine
+ * reminderTimes) is reached; without one, 30 minutes before. Never for another day.
  * An ongoing lesson or break does not suppress it. Equal next starts all remain visible.
  */
 export function nextOccurrenceIds(occurrences,now=Date.now()){
@@ -24,7 +26,7 @@ export function nextOccurrenceIds(occurrences,now=Date.now()){
   let nextStart=Infinity;
   const ids=new Set();
   for(const item of occurrences){
-    if(!Number.isFinite(item.startMs)||!Number.isFinite(item.endMs)||item.endMs<=item.startMs||item.startMs<=ms||item.startMs-ms>UPCOMING_WINDOW_MS)continue;
+    if(!Number.isFinite(item.startMs)||!Number.isFinite(item.endMs)||item.endMs<=item.startMs||item.startMs<=ms||ms<upcomingFrom(item))continue;
     if(localDate(new Date(item.startMs))!==today)continue;
     if(item.startMs<nextStart){nextStart=item.startMs;ids.clear();}
     if(item.startMs===nextStart)ids.add(item.id);

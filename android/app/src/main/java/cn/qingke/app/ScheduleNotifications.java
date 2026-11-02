@@ -129,7 +129,13 @@ final class ScheduleNotifications {
             for (int j = 1; j < segments.size(); j++) if (segments.get(j).start < segments.get(j - 1).end)
                 throw new JSONException("课程小节时间重叠");
             String type = row.optString("type", row.optString("kind", id.startsWith("exam:") ? "exam" : "course"));
-            events.add(new SchedulePlan.Event(id, name, location, start, end, segments, type));
+            long remind = SchedulePlan.NO_REMIND;
+            if (row.has("remind")) {
+                remind = row.getLong("remind");
+                // The timetable never reminds after class start or more than a day ahead.
+                if (remind > start || start - remind > 86400000L) throw new JSONException("提醒时间无效");
+            }
+            events.add(new SchedulePlan.Event(id, name, location, start, end, segments, type, remind));
         }
         events.sort(Comparator.comparingLong(event -> event.start));
         return new SchedulePlan(json.optBoolean("enabled"), json.optBoolean("ongoing"),
@@ -241,7 +247,7 @@ final class ScheduleNotifications {
                 .putStringSet("delivered", shiftedDelivered).remove("next").commit();
     }
     private static void shift(JSONObject value, ZoneId oldZone, ZoneId newZone) throws JSONException {
-        for (String key : new String[]{"start", "end"}) value.put(key, shiftLocalTime(value.getLong(key), oldZone, newZone));
+        for (String key : new String[]{"start", "end", "remind"}) if (value.has(key)) value.put(key, shiftLocalTime(value.getLong(key), oldZone, newZone));
     }
     private static long shiftLocalTime(long value, ZoneId oldZone, ZoneId newZone) {
         return Instant.ofEpochMilli(value).atZone(oldZone).toLocalDateTime().atZone(newZone).toInstant().toEpochMilli();

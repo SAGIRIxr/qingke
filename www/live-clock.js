@@ -1,4 +1,4 @@
-import {UPCOMING_WINDOW_MS} from './course-live.js';
+import {upcomingFrom} from './course-live.js';
 
 /** Seconds are useful only for a visible running progress bar. Idle cards need
  * updates at the next eligibility/start boundary, with a minute clock fallback. */
@@ -6,7 +6,7 @@ export function courseRefreshDelay(occurrences,now=Date.now()){
   let delay=60000;
   for(const item of occurrences){
     if(item.startMs<=now&&now<item.endMs)return 1000;
-    for(const boundary of [item.startMs-UPCOMING_WINDOW_MS,item.startMs]){
+    for(const boundary of [upcomingFrom(item),item.startMs]){
       if(Number.isFinite(boundary)&&boundary>now)delay=Math.min(delay,boundary-now);
     }
   }

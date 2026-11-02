@@ -73,6 +73,7 @@ export function createCourse(input, { maxPeriods = 24 } = {}) {
     name,
     teacher: shortText(input.teacher, 100, '教师'),
     location: shortText(input.location, 150, '教室'),
+    assessment: shortText(input.assessment, 30, '考核方式') || '未设置',
     day, startPeriod, endPeriod, weeks,
     color: input.color == null ? fallbackColor : integer(input.color, 0, 7, '颜色'),
     note: shortText(input.note, 2000, '备注'),

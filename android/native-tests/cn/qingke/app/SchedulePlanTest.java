@@ -38,6 +38,12 @@ public final class SchedulePlanTest {
         check(plan.remindersDue(START + 55 * M, START + 55 * M).size() == 1, "Optional break resume reminder");
         check(plan.remindersDue(START - 10 * M, START - M).size() == 1, "Delayed reminder still warns before class");
         check(plan.remindersDue(START - 10 * M, START + 5 * M).isEmpty(), "Stale pre-class reminder suppressed");
+        SchedulePlan.Event early = new SchedulePlan.Event("2", "高等数学", "A101", START, START + 100 * M,
+                List.of(new SchedulePlan.Segment(START, START + 100 * M)), "course", START - 90 * M);
+        SchedulePlan custom = new SchedulePlan(true, true, false, 10, List.of(early));
+        check(custom.nextAfter(START - 100 * M) == START - 90 * M, "Per-event reminder time replaces fixed lead");
+        check(custom.stateAt(START - 91 * M) == null && "before".equals(custom.stateAt(START - 90 * M).kind), "Upcoming status follows per-event time");
+        check(custom.remindersDue(START - 90 * M, START - 90 * M).size() == 1, "Reminder fires at per-event time");
         check(plan.remindersDue(START + 55 * M, START + 58 * M).isEmpty(), "Stale resume reminder suppressed");
         check(plan.remindersDue(START - 10 * M, START + 101 * M).isEmpty(), "Finished course never alerts");
         check(plan.remindersDue(START - 10 * M, START - 11 * M).isEmpty(), "Clock moved backwards: no premature alert");

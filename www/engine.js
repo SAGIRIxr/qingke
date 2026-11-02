@@ -76,6 +76,17 @@ export function configurePeriodGroup(periods, group, { startTime, durationMinute
   const duration = num(durationMinutes, 1, 360, '每节课分钟'), rest = num(breakMinutes, 0, 240, '课间分钟');
   return normalizePeriods(normalized.map(p => { if (p.group !== group) return p; const next = { ...p, start: clockTime(cursor), end: clockTime(cursor + duration) }; cursor += duration + rest; return next; }));
 }
+/** Set how many periods a day has: keep existing times, append after the last one or drop from the end. */
+export function setPeriodCount(periods, count, { durationMinutes = 45, breakMinutes = 10 } = {}) {
+  const normalized = normalizePeriods(periods), total = num(count, 1, 24, '每天节数');
+  const result = normalized.slice(0, total);
+  while (result.length < total) {
+    const start = minutes(result.at(-1).end) + breakMinutes, end = start + durationMinutes;
+    if (end >= 1440) throw new Error(`第 ${result.length + 1} 节会超过当天 24:00，请先把前面的节次提前`);
+    result.push({ start: clockTime(start), end: clockTime(end), group: result.at(-1).group === 'evening' || result.length >= 8 ? 'evening' : defaultGroup(result.length) });
+  }
+  return normalizePeriods(result);
+}
 /** Edit one period, optionally shifting only subsequent periods in its own group. */
 export function updatePeriodTime(periods, index, field, value, { cascade = true } = {}) {
   const normalized = normalizePeriods(periods), selectedIndex = num(index, 0, normalized.length - 1, '节次位置');
@@ -113,7 +124,15 @@ function validateSemester(input) {
     object(raw, '课程');
     const name = str(raw.name, 100, '课程名称', true);
     return { id: str(raw.id, 120, '课程编号', true), name, shortName: str(raw.shortName, 30, '课程简称'), color: num(raw.color, 0, 7, '课程颜色'), assessment: str(raw.assessment ?? '未设置', 30, '考核方式', true), nature: str(raw.nature, 50, '课程性质'), note: str(raw.note, 2000, '课程备注'), sessions: list(raw.sessions, 100, '上课安排', 1).map(s => {
-      object(s, '上课安排'); const startPeriod = num(s.startPeriod, 1, maxPeriod, '开始节次'), endPeriod = num(s.endPeriod, startPeriod, maxPeriod, '结束节次');
+      object(s, '上课安排');
+      // Name the course: a bare “周次应为 1—18” after shrinking a semester does not say what to fix.
+      if (Array.isArray(s.weeks)) {
+        if (!s.weeks.length) throw new Error(`「${name}」有一条安排没有有效的上课周次，请检查周次写法`);
+        const over = [...new Set(s.weeks.filter(w => Number.isInteger(Number(w)) && Number(w) > result.totalWeeks))].map(Number).sort((a, b) => a - b);
+        if (over.length) throw new Error(`「${name}」安排在第 ${over.join('、')} 周，超出本学期的 ${result.totalWeeks} 周，请先调整这门课的周次`);
+      }
+      for (const key of ['startPeriod', 'endPeriod']) if (Number.isInteger(Number(s[key])) && Number(s[key]) > maxPeriod) throw new Error(`「${name}」用到第 ${Number(s[key])} 节，但作息每天只有 ${maxPeriod} 节，请先在“上课作息”中增加节数`);
+      const startPeriod = num(s.startPeriod, 1, maxPeriod, '开始节次'), endPeriod = num(s.endPeriod, startPeriod, maxPeriod, '结束节次');
       const weeks = [...new Set(list(s.weeks, 300, '上课周次', 1).map(w => num(w, 1, result.totalWeeks, '周次')))].sort((a, b) => a - b);
       const session = { id: str(s.id, 120, '安排编号', true), day: num(s.day, 1, 7, '星期'), startPeriod, endPeriod, weeks, teacher: str(s.teacher, 100, '教师'), location: str(s.location, 150, '教室'), breakMode: enumeration(s.breakMode ?? 'normal', ['normal', 'continuous'], '课间模式') };
       if (s.importSource !== undefined) {
@@ -125,7 +144,7 @@ function validateSemester(input) {
     }) };
   });
   unique(result.courses, c => c.id, '课程编号');
-  const sessions = result.courses.flatMap(c => c.sessions);
+  const sessions = result.courses.flatMap(c => c.sessions), courseNames = new Map(result.courses.flatMap(c => c.sessions.map(t => [t.id, c.name])));
   unique(sessions, s => s.id, '上课安排编号');
   result.dayRules = list(input.dayRules ?? [], 500, '整日调课').map(raw => {
     object(raw, '整日调课'); const rule = { id: str(raw.id, 120, '调课编号', true), date: date(raw.date, '调课日期'), type: enumeration(raw.type, ['off', 'replace'], '整日调课类型'), label: str(raw.label, 150, '调课说明') };
@@ -139,7 +158,7 @@ function validateSemester(input) {
   result.exceptions = list(input.exceptions ?? [], 3000, '单次调课').map(raw => {
     object(raw, '单次调课'); const ex = { id: str(raw.id, 120, '变更编号', true), sessionId: str(raw.sessionId, 120, '原安排编号', true), sourceDate: date(raw.sourceDate, '原上课日期'), type: enumeration(raw.type, ['cancel', 'move', 'modify'], '单次调课类型') };
     const session = sessions.find(s => s.id === ex.sessionId);
-    if (!session || ex.sourceDate < result.startDate || session.day !== dayOf(ex.sourceDate) || !session.weeks.includes(weekOf(result, ex.sourceDate))) throw new Error('单次调课没有对应的原始上课安排');
+    if (!session || ex.sourceDate < result.startDate || session.day !== dayOf(ex.sourceDate) || !session.weeks.includes(weekOf(result, ex.sourceDate))) throw new Error(session ? `「${courseNames.get(session.id)}」${ex.sourceDate} 的单次调课已没有对应的原始上课安排，请先在“调休与调课”中撤销这条调课，再修改周次、星期或开学日期` : '单次调课没有对应的原始上课安排');
     if (ex.type === 'move') ex.date = date(raw.date, '调课目标日期');
     if (raw.startPeriod !== undefined) ex.startPeriod = num(raw.startPeriod, 1, maxPeriod, '调课开始节次');
     if (raw.endPeriod !== undefined) ex.endPeriod = num(raw.endPeriod, 1, maxPeriod, '调课结束节次');
@@ -170,7 +189,10 @@ export function validateState(input) {
   if (schoolUrl) { let parsed; try { parsed = new URL(schoolUrl); } catch { throw new Error('教务地址应为完整 http 或 https 网址'); } if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('教务地址须为无账号密码的 http 或 https 网址'); }
   const shareServerUrl = str(pref.shareServerUrl, 500, '分享服务地址');
   if (shareServerUrl) { let parsed; try { parsed = new URL(shareServerUrl); } catch { throw new Error('分享服务地址应为完整 HTTPS 根地址'); } if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || /[?#]/.test(shareServerUrl)) throw new Error('分享服务须为 HTTPS 根地址，不能包含账号、密码、路径、查询或片段'); }
-  const result = { version: 2, activeSemesterId: str(input.activeSemesterId, 120, '当前学期编号', true), preferences: { schoolUrl, shareServerUrl, viewMode: enumeration(pref.viewMode, ['week', 'three'], '课表视图'), notifications: { enabled: bool(notify.enabled, '课前提醒'), ongoing: bool(notify.ongoing, '状态通知'), minutes: num(notify.minutes, 0, 120, '提前提醒分钟'), breakReminder: bool(notify.breakReminder, '课间结束提醒'), statusMode: enumeration(notify.statusMode ?? 'remaining', ['remaining', 'elapsed'], '状态通知显示') } }, semesters: list(input.semesters, 30, '学期', 1).map(validateSemester) };
+  const result = { version: 2, activeSemesterId: str(input.activeSemesterId, 120, '当前学期编号', true), preferences: { schoolUrl, shareServerUrl, viewMode: enumeration(pref.viewMode, ['week', 'three'], '课表视图'), notifications: { enabled: bool(notify.enabled, '课前提醒'), ongoing: bool(notify.ongoing, '状态通知'), minutes: num(notify.minutes, 0, 120, '提前提醒分钟'), breakReminder: bool(notify.breakReminder, '课间结束提醒'), statusMode: enumeration(notify.statusMode ?? 'remaining', ['remaining', 'elapsed'], '状态通知显示'),
+    // Optional so older saved data is not rewritten on load; readers fall back to UPCOMING_LEADS.
+    ...(notify.leadAfterClass !== undefined ? { leadAfterClass: num(notify.leadAfterClass, 0, 120, '有前一节课时的提前分钟') } : {}),
+    ...(notify.leadFirst !== undefined ? { leadFirst: num(notify.leadFirst, 0, 240, '前面没课时的提前分钟') } : {}) } }, semesters: list(input.semesters, 30, '学期', 1).map(validateSemester) };
   unique(result.semesters, s => s.id, '学期编号'); if (!result.semesters.some(s => s.id === result.activeSemesterId)) throw new Error('当前学期不存在');
   return result;
 }
@@ -256,6 +278,33 @@ export function occurrenceStatus(occurrence, now = new Date()) {
   }
   const next = segments.find(s => s.startMs > ms);
   return { ...status, phase: 'break', remainingMs: next.startMs - ms, nextBoundaryMs: next.startMs, nextPeriod: next.period, label: '课间休息' };
+}
+
+export const UPCOMING_LEADS = Object.freeze({ afterClass: 35, firstClass: 90 });
+// A gap of up to an hour still counts as “the previous period had class”; lunch and dinner do not.
+export const BACK_TO_BACK_MS = 60 * 60000;
+export function upcomingLeads(notifications = {}) {
+  return { afterClass: notifications.leadAfterClass ?? UPCOMING_LEADS.afterClass, firstClass: notifications.leadFirst ?? UPCOMING_LEADS.firstClass };
+}
+
+/** When each dated arrangement becomes “即将上课”, also used for the pre-class notification.
+ * Right after another class: `afterClass` minutes before. After a free stretch (getting up, lunch,
+ * dinner): `firstClass` minutes before, but never before the previous class ends and never on the
+ * previous day. Returns Map<id, ms>. */
+export function reminderTimes(occurrences, leads = UPCOMING_LEADS) {
+  const result = new Map(), byDate = new Map();
+  for (const item of occurrences) { if (!byDate.has(item.date)) byDate.set(item.date, []); byDate.get(item.date).push(item); }
+  for (const [value, items] of byDate) {
+    const dayStart = at(value, '00:00');
+    for (const item of items) {
+      const previous = items.filter(other => other.startMs < item.startMs).reduce((end, other) => Math.max(end, other.endMs), -Infinity);
+      const backToBack = item.startMs - previous <= BACK_TO_BACK_MS;
+      let remind = item.startMs - (backToBack ? leads.afterClass : leads.firstClass) * 60000;
+      if (!backToBack) remind = Math.max(remind, previous);
+      result.set(item.id, Math.min(item.startMs, Math.max(remind, dayStart)));
+    }
+  }
+  return result;
 }
 
 /** All dated instances, including makeup classes outside the semester date range. */

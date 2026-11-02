@@ -9,6 +9,8 @@ import java.util.Set;
 /** Pure time-selection logic, shared by the Android scheduler and the JVM checks. */
 final class SchedulePlan {
     static final long MINUTE = 60_000L;
+    /** The event carries no explicit reminder time; use the plan's fixed lead instead. */
+    static final long NO_REMIND = Long.MIN_VALUE;
     static final int REMINDER = 1, CONTINUE = 2, STATE = 3;
     static final class Segment {
         final long start, end;
@@ -16,14 +18,18 @@ final class SchedulePlan {
     }
     static final class Event {
         final String id, name, location, type;
-        final long start, end;
+        final long start, end, remind;
         final List<Segment> segments;
         Event(String id, String name, String location, long start, long end, List<Segment> segments) {
             this(id, name, location, start, end, segments, "course");
         }
         Event(String id, String name, String location, long start, long end, List<Segment> segments, String type) {
+            this(id, name, location, start, end, segments, type, NO_REMIND);
+        }
+        /** remind: when the timetable computed “即将上课” for this occurrence (same day, not after start). */
+        Event(String id, String name, String location, long start, long end, List<Segment> segments, String type, long remind) {
             this.id = id; this.name = name; this.location = location;
-            this.start = start; this.end = end;
+            this.start = start; this.end = end; this.remind = remind;
             this.segments = Collections.unmodifiableList(new ArrayList<>(segments));
             this.type = "exam".equals(type) ? "exam" : "course";
         }
@@ -52,12 +58,13 @@ final class SchedulePlan {
         this.minutes = Math.max(0, Math.min(120, minutes));
         this.events = Collections.unmodifiableList(new ArrayList<>(events));
     }
+    long remindAt(Event event) { return event.remind != NO_REMIND ? event.remind : event.start - minutes * MINUTE; }
     List<Point> points() {
         if (cachedPoints != null) return cachedPoints;
         List<Point> points = new ArrayList<>();
         if (!enabled && !ongoing) return cachedPoints = Collections.emptyList();
         for (Event event : events) {
-            long before = event.start - minutes * MINUTE;
+            long before = remindAt(event);
             if (enabled) points.add(new Point(before, REMINDER, event));
             if (ongoing) points.add(new Point(before, STATE, event));
             // Alert-only mode needs no wakeup at class start: the reminder already exists.
@@ -101,7 +108,7 @@ final class SchedulePlan {
         Event selected = null;
         // An in-progress class takes priority over the following class's reminder window.
         for (Event event : events) {
-            if (now >= event.end || now < event.start - minutes * MINUTE) continue;
+            if (now >= event.end || now < remindAt(event)) continue;
             if (selected == null || (now >= event.start && now < selected.start)
                     || ((now >= event.start) == (now >= selected.start) && event.start < selected.start)) selected = event;
         }

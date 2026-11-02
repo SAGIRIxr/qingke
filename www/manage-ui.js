@@ -1,6 +1,6 @@
 import { createCalendarUI } from './calendar-ui.js';
-import { getWeekDates } from './core.js';
-import { uid, localDate, makeSemester, validateState, getProfile, updatePeriodTime, copyPeriodGroup } from './engine.js';
+import { getWeek, getWeekDates } from './core.js';
+import { uid, localDate, makeSemester, validateState, getProfile, updatePeriodTime, copyPeriodGroup, setPeriodCount } from './engine.js';
 import { esc, clone, icon, DAYS, button, select, field, input, toast, sheet, submit as submitButton } from './ui.js';
 
 const GROUPS = [['morning', '上午'], ['afternoon', '下午'], ['evening', '晚上']];
@@ -32,6 +32,8 @@ export function createManagementUI(ctx) {
     document.querySelector('#period-rows').innerHTML = profileDraft.periods.map(periodRow).join('');
     const count = document.querySelector('#managed-period-count');
     if (count) count.textContent = `${profileDraft.periods.length} 节`;
+    const select = document.querySelector('#profile-form [name="periodCount"]');
+    if (select) select.value = String(profileDraft.periods.length);
   }
 
   function readProfileControls(form = document.querySelector('#profile-form')) {
@@ -49,7 +51,7 @@ export function createManagementUI(ctx) {
     const [month, day] = monthDay(profileDraft.effectiveFrom).split('-').map(Number);
     const sources = semester().profiles.map(p => [p.id, p.name]);
     const sourceId = semester().profiles.find(p => p.id !== id)?.id ?? sources[0][0];
-    sheet(existing ? '编辑作息方案' : '添加作息方案', `<form id="profile-form" data-id="${esc(profileDraft.id)}">${field('方案名称', input('name', profileDraft.name, 'text', 'required maxlength="50" placeholder="例如 夏季作息"'))}<div class="form-row">${field('每年生效月份', select('effectiveMonth', Array.from({ length: 12 }, (_, i) => [i + 1, `${i + 1} 月`]), month))}${field('日期', select('effectiveDay', Array.from({ length: 31 }, (_, i) => [i + 1, `${i + 1} 日`]), day))}</div><p class="sheet-subtitle">不限定年份。该月日之后使用本方案，直到下一套方案生效；不存在的月日会在保存时提示。</p><label class="check-row"><input name="cascade" type="checkbox" checked><span><strong>同组时间联动</strong><small>修改一节后顺延本组后续小节，保留课间；不影响其他组。</small></span></label><div class="section-label">小节时间 <span id="managed-period-count">${profileDraft.periods.length} 节</span></div><div id="period-rows">${profileDraft.periods.map(periodRow).join('')}</div><div class="sheet-actions">${button('period-add', '增加一节')}${button('period-remove', '减少最后一节')}</div><details class="group-copy-box"><summary>从另一方案复制一个时段</summary>${field('来源方案', select('copySource', sources, sourceId))}<div class="form-row">${field('复制时段', select('copyGroup', GROUPS, 'afternoon'))}${field('整体偏移（分钟）', input('copyOffset', 0, 'number', 'min="-1439" max="1439" step="1"'))}</div><p class="sheet-subtitle">例如下午填 −30，整体提前半小时。保留每节时长及课间；来源与目标分组节数须一致。</p>${button('profile-copy-group', '复制到当前草稿', 'secondary full-width')}</details>${submitButton('预览并保存作息')}${existing ? button('profile-delete', '删除此作息方案', 'text-button', `data-id="${esc(existing.id)}" style="color:#a45b43;margin-top:12px"`) : ''}</form>`);
+    sheet(existing ? '编辑作息方案' : '添加作息方案', `<form id="profile-form" data-id="${esc(profileDraft.id)}">${field('方案名称', input('name', profileDraft.name, 'text', 'required maxlength="50" placeholder="例如 夏季作息"'))}<div class="form-row">${field('每年生效月份', select('effectiveMonth', Array.from({ length: 12 }, (_, i) => [i + 1, `${i + 1} 月`]), month))}${field('日期', select('effectiveDay', Array.from({ length: 31 }, (_, i) => [i + 1, `${i + 1} 日`]), day))}</div><p class="sheet-subtitle">不限定年份。该月日之后使用本方案，直到下一套方案生效；不存在的月日会在保存时提示。</p><label class="check-row"><input name="cascade" type="checkbox" checked><span><strong>同组时间联动</strong><small>修改一节后顺延本组后续小节，保留课间；不影响其他组。</small></span></label>${field('每天节数', select('periodCount', Array.from({ length: 24 }, (_, i) => [i + 1, `${i + 1} 节`]), profileDraft.periods.length), '增加时接在最后一节后面，按课间 10 分钟、每节 45 分钟补齐，可再逐节修改；减少时从最后一节删起。')}<div class="section-label">小节时间 <span id="managed-period-count">${profileDraft.periods.length} 节</span></div><div id="period-rows">${profileDraft.periods.map(periodRow).join('')}</div><div class="sheet-actions">${button('period-add', '增加一节')}${button('period-remove', '减少最后一节')}</div><details class="group-copy-box"><summary>从另一方案复制一个时段</summary>${field('来源方案', select('copySource', sources, sourceId))}<div class="form-row">${field('复制时段', select('copyGroup', GROUPS, 'afternoon'))}${field('整体偏移（分钟）', input('copyOffset', 0, 'number', 'min="-1439" max="1439" step="1"'))}</div><p class="sheet-subtitle">例如下午填 −30，整体提前半小时。保留每节时长及课间；来源与目标分组节数须一致。</p>${button('profile-copy-group', '复制到当前草稿', 'secondary full-width')}</details>${submitButton('预览并保存作息')}${existing ? button('profile-delete', '删除此作息方案', 'text-button', `data-id="${esc(existing.id)}" style="color:#a45b43;margin-top:12px"`) : ''}</form>`);
   }
 
   function deleteProfile(id) {
@@ -78,6 +80,22 @@ export function createManagementUI(ctx) {
     const namingMode = isNew || match ? 'auto' : 'custom';
     semesterDraft = { isNew, semester: clone(s) };
     sheet(isNew ? '新建学期' : '编辑学期', `<form id="semester-form" data-id="${esc(s.id)}" data-new="${isNew}"><div class="form-row">${field('学年起始年', input('academicYear', preset.year, 'number', 'min="1900" max="2199" step="1" required'))}${field('学期', select('academicTerm', [[1, '第一学期'], [2, '第二学期']], preset.term))}</div>${field('名称方式', select('namingMode', [['auto', '按学年与学期自动命名'], ['custom', '使用自定义名称']], namingMode))}${field('学期名称', input('name', namingMode === 'auto' ? academicName(preset.year, preset.term) : s.name, 'text', `required maxlength="80" ${namingMode === 'auto' ? 'readonly' : ''}`))}${field('实际开学日期', input('startDate', s.startDate, 'date', 'required'), '可以是任意星期。教学周始终周一至周日，首周开学前几天不排基础课程。')}${field('学期总周数', input('totalWeeks', s.totalWeeks, 'number', 'min="1" max="30" step="1" required'))}${submitButton(isNew ? '创建学期' : '预览学期变更')}</form>`);
+  }
+
+  /** Shrinking a semester drops weeks past its end instead of failing on every course. */
+  function trimWeeks(s) {
+    const total = Number(s.totalWeeks), courses = new Set(), removed = new Set(), empty = [];
+    if (!Number.isInteger(total)) return { courses: [], exceptions: 0 };
+    for (const course of s.courses) for (const session of course.sessions) {
+      const kept = session.weeks.filter(w => w <= total);
+      if (kept.length === session.weeks.length) continue;
+      if (!kept.length) { empty.push(course.name); continue; }
+      courses.add(course.name); session.weeks = kept; removed.add(session.id);
+    }
+    if (empty.length) throw Error(`「${[...new Set(empty)].join('、')}」有安排只在第 ${total} 周以后上课，缩短学期前请先删除或修改这些安排`);
+    const before = s.exceptions.length, week = date => getWeek(date, s.startDate);
+    s.exceptions = s.exceptions.filter(e => !removed.has(e.sessionId) || week(e.sourceDate) <= total);
+    return { courses: [...courses], exceptions: before - s.exceptions.length };
   }
 
   function updateSemesterName(form) {
@@ -136,9 +154,10 @@ export function createManagementUI(ctx) {
       case 'semester-form': {
         if (!semesterDraft) throw Error('学期草稿已过期，请重新打开');
         const original = semesterDraft.semester, s = semesterDraft.isNew ? makeSemester({ name: values.name, startDate: values.startDate, totalWeeks: Number(values.totalWeeks) }) : { ...clone(original), name: values.name, startDate: values.startDate, totalWeeks: Number(values.totalWeeks) };
+        const trimmed = semesterDraft.isNew ? { courses: [], exceptions: 0 } : trimWeeks(s);
         const next = semesterDraft.isNew ? { ...state(), semesters: [...state().semesters, s], activeSemesterId: s.id } : withSemester(s);
         const checked = validateState(next), firstWeek = getWeekDates(s.startDate, 1), nonMonday = weekday(s.startDate) !== 1;
-        const message = `${semesterDraft.isNew ? '创建' : '更新'}「${esc(s.name)}」，从 ${s.startDate} 起，共 ${s.totalWeeks} 个教学周。${nonMonday ? `<br><strong>开学日是星期${DAYS[weekday(s.startDate) - 1]}。</strong>第 1 周仍为 ${firstWeek[0]} 至 ${firstWeek[6]}，仅从 ${s.startDate} 开始排基础课程；此前几天不排课。请确认学校使用这种周次划分。` : ''}${!semesterDraft.isNew ? '<br>课程日期会重新计算，作息按每年月日切换；已有单次变更必须仍对应有效原安排。' : ''}`;
+        const message = `${semesterDraft.isNew ? '创建' : '更新'}「${esc(s.name)}」，从 ${s.startDate} 起，共 ${s.totalWeeks} 个教学周。${nonMonday ? `<br><strong>开学日是星期${DAYS[weekday(s.startDate) - 1]}。</strong>第 1 周仍为 ${firstWeek[0]} 至 ${firstWeek[6]}，仅从 ${s.startDate} 开始排基础课程；此前几天不排课。请确认学校使用这种周次划分。` : ''}${!semesterDraft.isNew ? '<br>课程日期会重新计算，作息按每年月日切换；已有单次变更必须仍对应有效原安排。' : ''}${trimmed.courses.length ? `<br><strong>学期缩短到 ${s.totalWeeks} 周：</strong>${trimmed.courses.map(esc).join('、')} 超出的周次会一并去掉${trimmed.exceptions ? `，${trimmed.exceptions} 条落在被去掉周次的单次调课也会撤销` : ''}。` : ''}`;
         if (nonMonday || !semesterDraft.isNew) ctx.confirmChange(checked, semesterDraft.isNew ? '新建学期前' : '修改学期设置前', message);
         else if (ctx.save(checked, '新建学期前')) { ctx.refresh(); toast('新学期已创建'); }
         return true;
@@ -157,6 +176,11 @@ export function createManagementUI(ctx) {
           profileDraft.periods = updatePeriodTime(profileDraft.periods, index, target.dataset.timeField, target.value, { cascade: profileForm.elements.namedItem('cascade').checked });
           redrawPeriods();
         } catch (error) { target.value = original; toast(error.message); }
+      } else if (target.name === 'periodCount') {
+        readProfileControls(profileForm);
+        try { profileDraft.periods = setPeriodCount(profileDraft.periods, Number(target.value)); }
+        catch (error) { toast(error.message); }
+        redrawPeriods();
       } else if (target.name.startsWith('group-')) {
         profileDraft.periods[Number(target.name.slice(6))].group = target.value;
       }
