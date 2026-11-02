@@ -14,11 +14,13 @@ public struct SchedulePlan {
     public struct Event {
         public let id: String, name: String, location: String, type: String
         public let start: Int64, end: Int64
+        /// When the timetable computed “即将上课” (same day, not after start); nil uses the fixed lead.
+        public let remind: Int64?
         public let segments: [Segment]
         public init(id: String, name: String, location: String, start: Int64, end: Int64,
-                    segments: [Segment], type: String = "course") {
+                    segments: [Segment], type: String = "course", remind: Int64? = nil) {
             self.id = id; self.name = name; self.location = location
-            self.start = start; self.end = end; self.segments = segments
+            self.start = start; self.end = end; self.segments = segments; self.remind = remind
             self.type = type == "exam" ? "exam" : "course"
         }
         public var isExam: Bool { type == "exam" }
@@ -104,7 +106,12 @@ public struct SchedulePlan {
                 throw ParseError.invalid("课程小节时间重叠")
             }
             let type = row["type"] as? String ?? row["kind"] as? String ?? (id.hasPrefix("exam:") ? "exam" : "course")
-            events.append(Event(id: id, name: name, location: location, start: start, end: end, segments: segments, type: type))
+            var remind: Int64?
+            if row["remind"] != nil {
+                guard let value = integer(row["remind"]), value <= start, start - value <= 86_400_000 else { throw ParseError.invalid("提醒时间无效") }
+                remind = value
+            }
+            events.append(Event(id: id, name: name, location: location, start: start, end: end, segments: segments, type: type, remind: remind))
         }
         events = stableSorted(events) { $0.start }
         return SchedulePlan(enabled: boolean(json["enabled"]), ongoing: boolean(json["ongoing"]),
@@ -143,7 +150,7 @@ public struct SchedulePlan {
         if !enabled && !ongoing { return [] }
         var points: [Point] = []
         for event in events {
-            let before = event.start - Int64(minutes) * minute
+            let before = event.remind ?? event.start - Int64(minutes) * minute
             if enabled { points.append(Point(at: before, kind: .reminder, event: event)) }
             if ongoing { points.append(Point(at: before, kind: .state, event: event)) }
             if ongoing { points.append(Point(at: event.start, kind: .state, event: event)) }
@@ -182,7 +189,7 @@ public struct SchedulePlan {
         if !ongoing { return nil }
         var selected: Event?
         for event in events {
-            if now >= event.end || now < event.start - Int64(minutes) * SchedulePlan.minute { continue }
+            if now >= event.end || now < (event.remind ?? event.start - Int64(minutes) * SchedulePlan.minute) { continue }
             if let current = selected {
                 if (now >= event.start && now < current.start)
                     || ((now >= event.start) == (now >= current.start) && event.start < current.start) { selected = event }

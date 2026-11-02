@@ -31,3 +31,10 @@ __pycache__/
 signing.local.*
 local-signing.json
 
+
+# iOS build output (project is generated from ios/project.yml)
+ios/Qingke.xcodeproj/
+build/sim/
+build/device/
+Payload/
+*.ipa

@@ -110,4 +110,15 @@ final class SchedulePlanTests: XCTestCase {
         XCTAssertEqual(resume.title, "高等数学 · 课间结束")
         XCTAssertEqual(resume.body, "A101 · 08:55 续课 · 09:40 下课")
     }
+
+    func testPerEventReminderTimeFromTimetable() throws {
+        let start: Int64 = 1_800_000_000_000, m = SchedulePlan.minute
+        let json = "{\"enabled\":true,\"ongoing\":true,\"minutes\":10,\"events\":[{\"id\":\"a\",\"name\":\"高等数学\",\"start\":\(start),\"end\":\(start + 100 * m),\"remind\":\(start - 90 * m)}]}"
+        let plan = try SchedulePlan.parse(json: json)
+        XCTAssertEqual(plan.nextAfter(start - 100 * m), start - 90 * m)
+        XCTAssertNil(plan.stateAt(start - 91 * m))
+        XCTAssertEqual(plan.stateAt(start - 90 * m)?.kind, "before")
+        XCTAssertEqual(plan.pendingAlerts(after: start - 100 * m, limit: 5).alerts.first?.at, start - 90 * m)
+        XCTAssertThrowsError(try SchedulePlan.parse(json: json.replacingOccurrences(of: "\(start - 90 * m)", with: "\(start + m)")))
+    }
 }

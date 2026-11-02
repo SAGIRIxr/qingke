@@ -1,34 +1,43 @@
-# 清课 iOS 版（进行中）
+# 清课 iOS 版
 
 iOS 版沿用 Android 的结构：同一套 `www/` 网页内核，加一个原生壳。网页通过 `window.Android.*` 调用原生能力，
-iOS 壳会注入一个**同名的** `window.Android` 垫片，所以第一版不需要改 `www/`。
+iOS 壳注入一个**同名的** `window.Android` 垫片（`platform: 'ios'`），网页按平台调整少量界面。
 
-## 进度
+## 结构
 
-- [x] `QingkeCore`：纯 Foundation 的 Swift 包，逐行移植 Android 的 `SchedulePlan`、`ShareRequestPolicy`、
-      `ShareEntryPolicy`、`ShareEntryInbox`，外加通知文案 `ReminderText`。测试移植自 `android/native-tests`。
-      运行：`swift test --package-path ios/QingkeCore`（需要 macOS）。**还没在 Mac 上跑过。**
-- [ ] `ios/Qingke`：App 壳（下面的设计）
-- [ ] `ios/project.yml`（XcodeGen）+ `.github/workflows/ios.yml`（macOS runner：核心测试、模拟器构建、模拟器启动截图、无签名 ipa）
-- [ ] App 图标（由 `www/icon.svg` 渲染，iOS 需要直角满版 1024px PNG）
+- `QingkeCore/`：纯 Foundation 的 Swift 包，移植 Android 的 `SchedulePlan`（含 3.3.3 的每次课程提示时间）、
+  `ShareRequestPolicy`、`ShareEntryPolicy`、`ShareEntryInbox` 和通知文案。`swift test --package-path ios/QingkeCore`。
+- `Qingke/`：App 壳（UIKit + WKWebView）
+  - `AppSchemeHandler`：`qingke-app://localhost/` 只读包内 `www/`，带同样的 CSP / nosniff / no-store。
+  - `BridgeScript` + `WebViewController`：垫片与白名单消息；同步 getter 读原生推送的缓存。
+  - `NotificationScheduler`：本地通知。iOS 每个 App 最多 64 条待发通知，只排最近 62 条提醒 +
+    1 条「打开清课续排」；启动、回到前台和后台刷新（`BGAppRefreshTask`）时补排。
+  - `ShareTransport`：分享请求（无 Cookie、无缓存、不跟随重定向、响应限 2 MB）。
+  - `SchoolBrowserViewController`：教务网页，独立 WKWebView，不挂桥；地址栏、桌面版切换、「导入此页」。
+  - `StorageMirror`：`qingke.*` 的 localStorage 同步到 App 沙盒文件，WKWebView 数据被系统清掉时自动恢复。
+- `project.yml`：XcodeGen 工程定义；`ci/`：模拟器截图用的示例课表与模拟器选择脚本。
 
-## 壳的设计（已定，待实现）
+## 界面
 
-| Android | iOS 做法 |
+`www/platform.js` 识别 iOS 后给 `<html>` 加 `platform-ios`，`www/ios.css` 只在这个类下生效：系统字体、
+大标题、iOS 分段控件和开关、Settings 风格的分组列表与彩色图标、胶囊按钮，以及毛玻璃——悬浮胶囊标签栏、
+状态栏条、吸顶的星期行、悬浮圆角的弹出层和提示条用真实模糊；大面积卡片用半透明（背景本身是柔和渐变，
+模糊和半透明看起来一样，但滚动时不耗 GPU）。浏览器里加 `?platform=ios` 可预览。
+
+iOS 上隐藏 Android 专有的设置：后台与省电、应用内更新、常驻课程状态通知（以后用 Live Activity）。
+
+## 与 Android 的差异
+
+| 功能 | iOS |
 | --- | --- |
-| `https://qingke.local` + `shouldInterceptRequest` | `WKURLSchemeHandler`，自定义 scheme `qingke-app://app/`，只读 bundle 里的 `www/`，带同样的 CSP / nosniff / no-store 头 |
-| `addJavascriptInterface` 同步调用 | `WKUserScript`（documentStart、仅主框架）注入 `window.Android` 垫片：同步 getter（`getNotificationStatus`、`getShareEntrySettings`、`consumeShareLink`）读 JS 侧缓存，原生推送更新；其余方法 `postMessage` 到原生白名单 |
-| `evaluateJavascript` 回调 + 20 次重试 | 同样的 dispatch + 250ms 重试；PDF 仍然分 192KB 块传 |
-| AlarmManager 滚动精确闹钟 | `UNCalendarNotificationTrigger`（浮动本地时间，自动适配时区变化）。iOS 每个 App 最多 64 条待发通知：只排最近 62 条提醒 + 1 条「打开清课续排」提示；前台和 `BGAppRefreshTask` 时补排。`exact` 恒为 true |
-| 课程状态常驻通知 | 第一版不做；以后用 Live Activity（需 Widget 扩展） |
-| 后台/自启动设置、应用内更新 | iOS 不适用，不注入对应方法，网页会显示「需要 Android 安装版」（之后可按 `platform` 调文案） |
-| 教务网页 WebView | 全屏 VC + 独立 WKWebView，不挂桥；同样的地址校验、桌面版切换（`preferredContentMode`）、`target=_blank` 收回同一页、同一段「导入此页」抓取脚本 |
-| 备份/PDF 选择 | `UIDocumentPickerViewController`（导出用 `forExporting`，导入限 5MB / 20MB 并校验 JSON / `%PDF-`） |
-| 分享链接 `qingke://share` / `https://qk.sagiri.org/s` | URL scheme 直接可用；Universal Link 需要付费开发者账号 + 服务器 `apple-app-site-association` |
-| 剪贴板识别 | 只在 `changeCount` 变化且 `detectPatterns(.probableWebURL)` 命中时才读，减少 iOS 的粘贴提示 |
-| — | **localStorage 镜像**：iOS 在存储紧张时可能清掉 WKWebView 数据。垫片拦截 `qingke.*` 键的写入同步到 App 沙盒文件；启动时若 localStorage 里一个 `qingke.*` 键都没有而镜像有，就整体恢复 |
+| 准时提醒 | 预先登记本地通知，跟随设备当地时间；不需要额外权限 |
+| 常驻状态通知 | 暂不支持 |
+| 分享链接 | `qingke://share` 可直接唤起；`https://qk.sagiri.org/s` 的 Universal Link 需要付费开发者账号 |
+| 剪贴板识别 | 默认关闭（iOS 每次读取剪贴板都会弹确认）；开启后只在检测到链接时读取 |
+| 返回 | 从屏幕左边缘右滑，逐层返回 |
 
 ## 构建与安装（不需要 Mac）
 
-GitHub Actions 的 macOS runner 编译出无签名 `.ipa`，Windows 上用 Sideloadly + 免费 Apple ID 装到 iPhone（7 天重签一次）。
-要上架或长期分发需要 Apple Developer 账号（$99/年），届时再加签名和 TestFlight。
+推送 `ios` 分支会触发 `.github/workflows/ios.yml`（macOS runner）：核心测试 → 生成工程 → 模拟器构建与截图 →
+无签名 `.ipa`。在 Actions 页面下载 `ios-unsigned-ipa`，Windows 上用 Sideloadly + Apple ID 安装到 iPhone
+（免费账号 7 天需重签一次）。上架或长期分发需要 Apple Developer 账号（$99/年），届时再加签名和 TestFlight。

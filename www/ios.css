@@ -1,0 +1,179 @@
+/* iOS skin: Apple system typography and frosted glass, active only under html.platform-ios.
+ * Real backdrop blur is reserved for layers that float over scrolling content (status strip,
+ * sticky weekday row, tab bar, sheets, toast). Large surfaces sit on a soft gradient wallpaper,
+ * where plain translucency looks the same as blur and costs nothing while scrolling. */
+.platform-ios{
+  --tint:#1f5c48;--tint-soft:#1f5c4816;--label:#1c2420;--label-2:#3c3c4399;--label-3:#3c3c434d;
+  --fill:#7676801f;--fill-2:#78788029;--separator:#3c3c4329;--surface:#ffffffb8;--surface-strong:#ffffffd9;
+  --glass:#f7f9f6a8;--glass-edge:#ffffffb3;--glass-blur:saturate(180%) blur(24px);
+  --glass-shadow:0 10px 34px #1c33281a,0 1px 0 #ffffffcc inset;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",sans-serif;
+  color:var(--label);background:#eef2ed;-webkit-text-size-adjust:100%;
+}
+.platform-ios body{background:transparent;-webkit-tap-highlight-color:transparent}
+/* Wallpaper: soft brand-tinted light that the glass layers pick up. */
+.platform-ios body:before{content:"";position:fixed;inset:-10%;z-index:-1;pointer-events:none;
+  background:radial-gradient(60% 45% at 12% 8%,#d9ead1 0,transparent 70%),radial-gradient(55% 40% at 92% 30%,#f3e6cb 0,transparent 70%),
+  radial-gradient(70% 50% at 30% 95%,#d3e7e1 0,transparent 70%),#eef2ed}
+/* Status bar strip: content scrolls under a frosted band like a native navigation bar. */
+.platform-ios body:after{content:"";position:fixed;left:0;right:0;top:0;height:env(safe-area-inset-top);z-index:20;pointer-events:none;
+  background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+.platform-ios #app{padding-top:env(safe-area-inset-top);padding-bottom:calc(env(safe-area-inset-bottom) + 96px)}
+.platform-ios h1,.platform-ios h2,.platform-ios h3,.platform-ios .detail-name,.platform-ios .section-heading h1,.platform-ios .sheet-head h2,
+.platform-ios .title-line h1,.platform-ios .welcome-card h2{font-family:inherit;letter-spacing:0}
+.platform-ios .date-number,.platform-ios .period-label strong,.platform-ios .period-label small,.platform-ios .period-label time,
+.platform-ios .today-summary>strong,.platform-ios .agenda-time,.platform-ios .timeline-segment strong,.platform-ios .step-num,
+.platform-ios .period-edit label,.platform-ios .week-option{font-family:inherit;font-variant-numeric:tabular-nums}
+
+/* ---------- Timetable header ---------- */
+.platform-ios .page.planner-page{padding:6px 12px 14px}
+.platform-ios .planner-head{height:44px;padding:0 4px}
+.platform-ios .semester-switch{font-size:15px;font-weight:600;color:var(--tint)}
+.platform-ios .head-status{font-size:13px;color:var(--label-2)}
+.platform-ios .round-add{width:36px;height:36px;border-radius:50%;background:var(--tint);color:#fff;box-shadow:0 6px 16px #1f5c4840}
+.platform-ios .planner-tools{padding:2px 2px 12px;gap:6px}
+.platform-ios .planner-tools .week-picker{font-size:25px;font-weight:700;letter-spacing:-.3px;color:var(--label);white-space:nowrap;gap:4px}
+.platform-ios .planner-tools .week-picker svg{color:var(--label-2)}
+.platform-ios .view-toggle{background:var(--fill);border-radius:10px;padding:2px}
+.platform-ios .view-toggle button{font-size:13px;font-weight:500;color:var(--label);border-radius:8px;padding:5px 10px;white-space:nowrap}
+.platform-ios .view-toggle button.active{background:#fff;color:var(--label);font-weight:600;box-shadow:0 3px 8px #0000001f,0 3px 1px #0000000a}
+.platform-ios .planner-tools .week-arrows{gap:6px}
+.platform-ios .week-arrows button,.platform-ios .planner-tools .this-week{width:32px;height:32px;white-space:nowrap;border-radius:50%;border:0;
+  background:var(--surface);color:var(--tint);box-shadow:0 1px 0 #ffffffcc inset,0 2px 8px #1c33280f}
+.platform-ios .planner-tools .this-week{width:auto;padding:0 11px;border-radius:16px;font-size:13px;font-weight:600}
+
+/* ---------- Timetable card ---------- */
+.platform-ios .planner-page .table-shell{overflow:clip;border:1px solid var(--glass-edge);border-radius:22px;background:var(--surface);
+  box-shadow:0 12px 40px #1c33280f}
+.platform-ios .planner-page .day-header{position:sticky;top:env(safe-area-inset-top);z-index:6;background:var(--glass);
+  -webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:.5px solid var(--separator)}
+.platform-ios .planner-page .day-label{color:var(--label-2);font-size:11px}
+.platform-ios .planner-page .date-number{color:var(--label);font-size:17px;font-weight:500;border-radius:50%}
+.platform-ios .day-label.current .date-number{background:var(--tint);color:#fff;border-radius:50%;font-weight:600}
+.platform-ios .day-label.current{color:var(--tint);font-weight:600}
+.platform-ios .month-tag{color:var(--label-2)}
+.platform-ios .planner-page .period-label strong{color:var(--label);font-weight:600}
+.platform-ios .planner-page .period-label time{color:var(--label-2)}
+.platform-ios .planner-page .period-label small{color:var(--label-3)}
+.platform-ios .planner-page .row-line{background:var(--separator);height:.5px}
+.platform-ios .planner-page .course-block{border-radius:12px;border:0;box-shadow:0 0 0 .5px #ffffffb3 inset,0 2px 6px #1c33280d}
+.platform-ios .planner-page .course-block strong{font-weight:600}
+.platform-ios .legend,.platform-ios .calendar-footnote{color:var(--label-2)}
+.platform-ios .legend .text-button{color:var(--tint)}
+.platform-ios .axis-reference{background:var(--tint-soft);color:var(--tint)}
+.platform-ios .exam-strip{background:transparent}
+
+/* ---------- Floating glass tab bar ---------- */
+.platform-ios .bottom-nav{left:50%;bottom:calc(env(safe-area-inset-bottom) + 10px);transform:translateX(-50%);
+  width:min(calc(100% - 40px),380px);height:64px;padding:6px;border-radius:32px;justify-content:space-between;
+  background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  border:1px solid var(--glass-edge);border-top:1px solid var(--glass-edge);box-shadow:var(--glass-shadow)}
+.platform-ios .nav-item{flex:1;height:100%;justify-content:center;gap:2px;border-radius:26px;color:var(--label);font-size:10px;font-weight:500;
+  transition:background .25s,color .25s}
+.platform-ios .nav-item .nav-icon{width:auto;height:26px;background:none!important}
+.platform-ios .nav-item.active{background:#ffffffb8;color:var(--tint);font-weight:600;box-shadow:0 1px 0 #fff inset,0 2px 10px #1c332814}
+
+/* ---------- Large titles and grouped lists ---------- */
+.platform-ios .page{padding:8px 16px 10px}
+.platform-ios .section-heading{margin:6px 4px 18px}
+.platform-ios .section-heading h1{font-size:34px;font-weight:700;line-height:1.2;letter-spacing:-.4px;color:var(--label)}
+.platform-ios .section-heading p{font-size:15px;color:var(--label-2)}
+.platform-ios .settings-section{margin:26px 0}
+.platform-ios .settings-section h2{font-size:13px;font-weight:400;letter-spacing:0;color:var(--label-2);margin:0 0 7px 18px}
+.platform-ios .setting-group{background:var(--surface-strong);border:0;border-radius:20px;box-shadow:0 1px 0 #ffffffcc inset}
+.platform-ios .settings-section .setting-row{padding:11px 16px;gap:14px;min-height:56px}
+.platform-ios .setting-row+.setting-row{border-top:0;position:relative}
+.platform-ios .setting-row+.setting-row:before{content:"";position:absolute;top:0;right:0;left:60px;border-top:.5px solid var(--separator)}
+.platform-ios .settings-section .setting-icon,.platform-ios .setting-row>.setting-icon{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;
+  color:#fff;background:#8e8e93;flex-shrink:0}
+.platform-ios .setting-icon svg{width:18px;height:18px;stroke-width:2}
+.platform-ios [data-action="import"]>.setting-icon{background:#007aff}
+.platform-ios [data-action="all-courses"]>.setting-icon{background:#34c759}
+.platform-ios [data-action="exams"]>.setting-icon{background:#ff9500}
+.platform-ios [data-action="semesters"]>.setting-icon{background:#ff3b30}
+.platform-ios [data-action="profiles"]>.setting-icon{background:#5856d6}
+.platform-ios [data-action="calendar"]>.setting-icon{background:#30b0c7}
+.platform-ios [data-action="notifications"]>.setting-icon{background:#ff2d55}
+.platform-ios [data-action="toggle-weekend"]>.setting-icon{background:#8e8e93}
+.platform-ios [data-action="share-home"]>.setting-icon{background:var(--tint)}
+.platform-ios [data-action="backup-menu"]>.setting-icon,.platform-ios [data-action="export"]>.setting-icon{background:#007aff}
+.platform-ios [data-action="restore"]>.setting-icon{background:#34c759}
+.platform-ios [data-action="recovery"]>.setting-icon{background:#ff9500}
+.platform-ios .row-text strong{font-size:16px;font-weight:400;color:var(--label)}
+.platform-ios .row-text small{font-size:12px;color:var(--label-2);margin-top:2px}
+.platform-ios .setting-row>svg:last-child{color:var(--label-3)}
+.platform-ios .about-mark p{color:var(--label-2)}
+
+/* ---------- Today ---------- */
+.platform-ios .today-summary{border-bottom:0;padding:0 4px 8px;color:var(--label-2);font-size:15px}
+.platform-ios .today-summary>strong{font-size:44px;font-weight:700;color:var(--label)}
+.platform-ios .today-summary .pill{background:var(--surface);color:var(--tint)}
+.platform-ios .agenda-time{color:var(--label);font-weight:600;font-size:15px}
+.platform-ios .agenda-time small{color:var(--label-2);font-weight:400}
+.platform-ios .agenda-card{border-radius:22px;box-shadow:0 0 0 .5px #ffffffb3 inset,0 8px 24px #1c33280f}
+.platform-ios .agenda-card h3{font-size:17px;font-weight:600}
+.platform-ios .empty-today{color:var(--label-2)}
+
+/* ---------- Switches: iOS style for .switch and checkbox rows ---------- */
+.platform-ios .switch{width:51px;height:31px;border-radius:16px;background:var(--fill-2)}
+.platform-ios .switch.on{background:#34c759}
+.platform-ios .switch:after{width:27px;height:27px;left:2px;top:2px;box-shadow:0 3px 8px #00000026,0 3px 1px #0000000f}
+.platform-ios .switch.on:after{transform:translateX(20px)}
+.platform-ios .check-row{border-bottom:.5px solid var(--separator);padding:13px 0}
+.platform-ios .check-row>input[type=checkbox]{-webkit-appearance:none;appearance:none;order:2;margin:0 0 0 auto;width:51px;height:31px;border-radius:16px;
+  background:var(--fill-2);position:relative;flex-shrink:0;transition:background .25s;border:0;padding:0}
+.platform-ios .check-row>input[type=checkbox]:after{content:"";position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;
+  box-shadow:0 3px 8px #00000026,0 3px 1px #0000000f;transition:transform .25s cubic-bezier(.3,.7,.4,1)}
+.platform-ios .check-row>input[type=checkbox]:checked{background:#34c759}
+.platform-ios .check-row>input[type=checkbox]:checked:after{transform:translateX(20px)}
+.platform-ios .check-row strong{font-size:16px;font-weight:400}
+.platform-ios .check-row small{color:var(--label-2);font-size:13px}
+
+/* ---------- Buttons and fields ---------- */
+.platform-ios .primary,.platform-ios .secondary,.platform-ios .danger{border-radius:999px;min-height:50px;font-size:16px;font-weight:600;border:0;padding:0 20px}
+.platform-ios .empty-actions .secondary{min-height:44px;font-size:15px}
+.platform-ios .primary{background:var(--tint);color:#fff;box-shadow:0 6px 18px #1f5c4833}
+.platform-ios .secondary{background:var(--tint-soft);color:var(--tint)}
+.platform-ios .danger{background:#ff3b301a;color:#ff3b30}
+.platform-ios .text-button{color:var(--tint);font-size:15px}
+.platform-ios input,.platform-ios select,.platform-ios textarea{border:0;border-radius:12px;background:var(--surface-strong);color:var(--label);font-size:16px;
+  padding:12px 14px;box-shadow:0 0 0 .5px var(--separator) inset}
+.platform-ios input:focus-visible,.platform-ios select:focus-visible,.platform-ios textarea:focus-visible{outline:none;box-shadow:0 0 0 2px var(--tint) inset}
+.platform-ios .field>span,.platform-ios .field-label{font-size:13px;font-weight:400;color:var(--label-2);margin:0 0 6px 4px}
+.platform-ios .field small{color:var(--label-2);margin-left:4px}
+.platform-ios .helper-box{background:var(--surface);border-radius:14px;color:var(--label-2);font-size:13px;line-height:1.7}
+.platform-ios .warning-box{background:#ff95001f;color:#9a5b00}
+.platform-ios .source-note{color:var(--label-2);font-size:12px}
+.platform-ios .pill{background:var(--fill);color:var(--label)}
+
+/* ---------- Sheets: floating, rounded, frosted ---------- */
+.platform-ios .backdrop{background:#0000002e;-webkit-backdrop-filter:none;backdrop-filter:none}
+.platform-ios .sheet{width:calc(100% - 16px);margin:0 8px calc(env(safe-area-inset-bottom) + 8px);border-radius:34px;max-height:calc(100dvh - env(safe-area-inset-top) - 24px);
+  background:#f4f6f3c7;-webkit-backdrop-filter:saturate(180%) blur(34px);backdrop-filter:saturate(180%) blur(34px);
+  border:1px solid var(--glass-edge);box-shadow:0 24px 70px #1c33283d;padding-bottom:0;animation:ios-sheet .42s cubic-bezier(.2,.9,.25,1)}
+.platform-ios .sheet-handle{width:36px;height:5px;background:var(--label-3);margin-top:7px}
+.platform-ios .sheet-head{position:relative;justify-content:center;padding:10px 60px 10px}
+.platform-ios .sheet-head h2{font-size:17px;font-weight:600;text-align:center}
+.platform-ios .sheet-head .close-sheet,.platform-ios .sheet-head .sheet-back{position:absolute;top:8px;width:34px;height:34px;border-radius:50%;
+  background:var(--fill-2);color:var(--label)}
+.platform-ios .sheet-head .close-sheet{right:16px}
+.platform-ios .sheet-head .sheet-back{left:16px}
+.platform-ios .sheet-body{padding:6px 18px 22px}
+.platform-ios .sheet-subtitle{color:var(--label-2);font-size:14px}
+.platform-ios .detail-name{font-size:26px;font-weight:700}
+.platform-ios .detail-row{color:var(--label)}
+.platform-ios .detail-row svg{color:var(--tint)}
+.platform-ios .lesson-timeline{background:var(--surface)}
+.platform-ios .course-list-item,.platform-ios .change-row{border-bottom:.5px solid var(--separator)}
+.platform-ios .semester-card,.platform-ios .profile-card,.platform-ios .diff-item,.platform-ios .preview-course,.platform-ios .session-editor{
+  background:var(--surface-strong);border:0;border-radius:16px}
+.platform-ios .week-option{background:var(--surface-strong);border-radius:14px}
+.platform-ios .week-option.active{background:var(--tint);color:#fff}
+@keyframes ios-sheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+
+/* ---------- Toast: dark glass capsule above the tab bar ---------- */
+.platform-ios #toast{bottom:calc(env(safe-area-inset-bottom) + 86px);border-radius:999px;padding:12px 20px;font-size:14px;
+  background:#1e2a24c7;-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);box-shadow:0 10px 30px #00000033}
+
+@media(min-width:650px){.platform-ios .sheet{width:100%;max-width:560px;margin:0 auto 24px}}
+@media(prefers-reduced-motion:reduce){.platform-ios .sheet{animation:none}}
