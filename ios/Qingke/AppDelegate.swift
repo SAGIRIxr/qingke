@@ -6,7 +6,7 @@ import UserNotifications
 final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static let refreshTask = "cn.qingke.app.refresh"
     var window: UIWindow?
-    private var timetable: WebViewController? { window?.rootViewController as? WebViewController }
+    private var timetable: WebViewController? { (window?.rootViewController as? MainTabController)?.timetable }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
@@ -17,7 +17,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationC
             NotificationScheduler.shared.reschedule { _ in task.setTaskCompleted(success: true) }
         }
         let window = UIWindow(frame: UIScreen.main.bounds)
-        window.rootViewController = WebViewController()
+        window.rootViewController = MainTabController()
         window.makeKeyAndVisible()
         self.window = window
         if let url = launchOptions?[.url] as? URL { timetable?.acceptShareURL(url) }

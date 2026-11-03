@@ -13,6 +13,9 @@ final class ShareTransport: NSObject, URLSessionTaskDelegate {
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 40
         configuration.httpMaximumConnectionsPerHost = 2
+        // The first request of a fresh install races the system "allow cellular data" prompt (China
+        // models) and the radio waking up; wait for a usable path instead of failing at once.
+        configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
     private var active = Set<String>()
@@ -49,8 +52,7 @@ final class ShareTransport: NSObject, URLSessionTaskDelegate {
             http.httpBody = body
             http.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
-        session.dataTask(with: http) { [weak self] data, response, error in
-            defer { self?.lock.lock(); self?.active.remove(id); self?.lock.unlock() }
+        func handle(_ data: Data?, _ response: URLResponse?, _ error: Error?) {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if let error = error as? URLError {
                 switch error.code {
@@ -78,7 +80,27 @@ final class ShareTransport: NSObject, URLSessionTaskDelegate {
                 message = error?["message"] as? String ?? json?["message"] as? String ?? json?["error"] as? String ?? "服务器返回 \(status)"
             }
             finish(ok, status, json, message)
-        }.resume()
+        }
+        func send(attempt: Int) {
+            session.dataTask(with: http) { [weak self] data, response, error in
+                if attempt == 0, let code = (error as? URLError)?.code, Self.retryable(code, method: request.method) {
+                    return DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { send(attempt: 1) }
+                }
+                self?.lock.lock(); self?.active.remove(id); self?.lock.unlock()
+                handle(data, response, error)
+            }.resume()
+        }
+        send(attempt: 0)
+    }
+
+    /// One quiet retry for failures that happen before the request reaches the server, so even a
+    /// POST cannot be applied twice. A dropped connection is retried only for reads.
+    private static func retryable(_ code: URLError.Code, method: String) -> Bool {
+        switch code {
+        case .notConnectedToInternet, .dataNotAllowed, .cannotFindHost, .dnsLookupFailed, .cannotConnectToHost: return true
+        case .networkConnectionLost: return method == "GET"
+        default: return false
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

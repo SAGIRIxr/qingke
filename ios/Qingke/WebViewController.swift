@@ -8,6 +8,11 @@ import WebKit
 final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, UIDocumentPickerDelegate, UIGestureRecognizerDelegate {
     private static let maxBackupBytes = 5 * 1024 * 1024
     private static let maxPDFBytes = 20 * 1024 * 1024
+    static let paper = UIColor(red: 0.933, green: 0.949, blue: 0.929, alpha: 1)
+    private static let tabKeys: Set = ["table", "today", "settings"]
+    /// The page's current tab and whether a sheet is open, for the native tab bar.
+    var onChrome: ((String, Bool) -> Void)?
+    private var chromeInsets = ""
     private var webView: WKWebView!
     private let share = ShareTransport()
     private let inbox = ShareEntryInbox()
@@ -37,7 +42,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         webView.uiDelegate = self
         webView.allowsLinkPreview = false
         webView.isOpaque = false
-        webView.backgroundColor = UIColor(red: 0.933, green: 0.949, blue: 0.929, alpha: 1)
+        webView.backgroundColor = Self.paper
         webView.scrollView.backgroundColor = webView.backgroundColor
         // The page draws under the status bar and home indicator and pads with env(safe-area-inset-*).
         webView.scrollView.contentInsetAdjustmentBehavior = .never
@@ -84,7 +89,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         ["version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
          "notificationStatus": ["granted": false, "exact": true, "enabled": NotificationScheduler.shared.savedPlan?.enabled ?? false,
                                 "ongoing": false, "platform": "ios"],
-         "shareEntrySettings": ["clipboardEnabled": clipboardEnabled]]
+         "shareEntrySettings": ["clipboardEnabled": clipboardEnabled], "nativeTabs": true]
     }
 
     // iOS asks before every programmatic paste, so clipboard detection is opt-in here.
@@ -101,6 +106,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pageReady = true
+        pushChromeInsets()
         pushNotificationStatus()
         runDemoScript()
         readShareClipboard()
@@ -171,6 +177,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             if let all = args.first as? [String: String] { StorageMirror.shared.replace(all) }
         case "mirrorClear":
             StorageMirror.shared.clear()
+        case "chrome":
+            guard let tab = string(0), Self.tabKeys.contains(tab) else { return }
+            onChrome?(tab, args.count > 1 && args[1] as? Bool == true)
         case "log":
             #if DEBUG
             NSLog("[QingkeWeb] %@", string(0) ?? "")
@@ -196,6 +205,26 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             self?.webView.evaluateJavaScript("window.__qingkeNativeUpdate&&window.__qingkeNativeUpdate({notificationStatus:\(json)})", completionHandler: nil)
             self?.dispatch("onNotificationStatus", json)
         }
+    }
+
+    // MARK: Native tab bar
+
+    func selectTab(_ key: String) {
+        guard Self.tabKeys.contains(key) else { return }
+        dispatch("onNativeTab", BridgeScript.literal(key))
+    }
+
+    /// Bar and safe-area sizes as CSS variables; env() inside a tab child would include the bar.
+    func setChromeInsets(tabBar: CGFloat, top: CGFloat, bottom: CGFloat) {
+        let css = String(format: "--tabbar:%.1fpx;--sat:%.1fpx;--sab:%.1fpx", tabBar, top, bottom)
+        guard css != chromeInsets else { return }
+        chromeInsets = css
+        pushChromeInsets()
+    }
+
+    private func pushChromeInsets() {
+        guard pageReady, isViewLoaded, !chromeInsets.isEmpty else { return }
+        webView.evaluateJavaScript("document.documentElement.style.cssText=\(BridgeScript.literal(chromeInsets))", completionHandler: nil)
     }
 
     private func toast(_ message: String) { dispatch("onNativeMessage", BridgeScript.literal(message)) }

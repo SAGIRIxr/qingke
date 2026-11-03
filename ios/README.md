@@ -8,6 +8,9 @@ iOS 壳注入一个**同名的** `window.Android` 垫片（`platform: 'ios'`）�
 - `QingkeCore/`：纯 Foundation 的 Swift 包，移植 Android 的 `SchedulePlan`（含 3.3.3 的每次课程提示时间）、
   `ShareRequestPolicy`、`ShareEntryPolicy`、`ShareEntryInbox` 和通知文案。`swift test --package-path ios/QingkeCore`。
 - `Qingke/`：App 壳（UIKit + WKWebView）
+  - `MainTabController`：系统标签栏（iOS 26 上即 Liquid Glass）浮在同一个 WebView 上。网页仍是标签状态的唯一来源：
+    点原生标签调 `onNativeTab`，网页切页/开关弹出层时经 `setChrome` 回报，弹出层打开时标签栏让开；
+    标签栏占用的高度和安全区通过 `--tabbar/--sat/--sab` 传给网页。
   - `AppSchemeHandler`：`qingke-app://localhost/` 只读包内 `www/`，带同样的 CSP / nosniff / no-store。
   - `BridgeScript` + `WebViewController`：垫片与白名单消息；同步 getter 读原生推送的缓存。
   - `NotificationScheduler`：本地通知。iOS 每个 App 最多 64 条待发通知，只排最近 62 条提醒 +
@@ -20,9 +23,9 @@ iOS 壳注入一个**同名的** `window.Android` 垫片（`platform: 'ios'`）�
 ## 界面
 
 `www/platform.js` 识别 iOS 后给 `<html>` 加 `platform-ios`，`www/ios.css` 只在这个类下生效：系统字体、
-大标题、iOS 分段控件和开关、Settings 风格的分组列表与彩色图标、胶囊按钮，以及毛玻璃——悬浮胶囊标签栏、
-状态栏条、吸顶的星期行、悬浮圆角的弹出层和提示条用真实模糊；大面积卡片用半透明（背景本身是柔和渐变，
-模糊和半透明看起来一样，但滚动时不耗 GPU）。浏览器里加 `?platform=ios` 可预览。
+大标题（滚动后在顶部居中显示小标题）、iOS 分段控件和开关、单色图标的分组列表、胶囊按钮，以及毛玻璃——
+渐隐的顶部滚动边缘、吸顶的星期行、悬浮圆角的弹出层和提示条用真实模糊；大面积卡片用半透明（背景本身是柔和渐变，
+模糊和半透明看起来一样，但滚动时不耗 GPU）。浏览器里加 `?platform=ios` 可预览（没有原生标签栏时用网页自带的悬浮胶囊）。
 
 iOS 上隐藏 Android 专有的设置：后台与省电、应用内更新、常驻课程状态通知（以后用 Live Activity）。
 

@@ -17,6 +17,8 @@ enum BridgeScript {
           window.__qingkeNativeEnqueue = function(entries){ native.shareQueue = native.shareQueue.concat(entries).slice(-8); };
           var bridge = {
             platform: 'ios',
+            nativeTabs: !!native.nativeTabs,
+            setChrome: function(tab, modal){ post('chrome', [String(tab), !!modal]); },
             getVersion: function(){ return native.version; },
             getNotificationStatus: function(){ return JSON.stringify(native.notificationStatus); },
             syncSchedule: function(json){ post('syncSchedule', [String(json)]); },
