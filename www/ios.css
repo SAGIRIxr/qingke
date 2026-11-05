@@ -43,8 +43,10 @@
 .platform-ios .semester-switch{font-size:15px;font-weight:600;color:var(--tint)}
 .platform-ios .head-status{font-size:13px;color:var(--label-2)}
 .platform-ios .round-add{width:36px;height:36px;border-radius:50%;background:var(--tint);color:#fff;box-shadow:0 6px 16px #1f5c4840}
-.platform-ios .planner-tools{padding:2px 2px 12px;gap:6px}
-.platform-ios .planner-tools .week-picker{font-size:25px;font-weight:700;letter-spacing:-.3px;color:var(--label);white-space:nowrap;gap:4px}
+/* The picker takes the free space, so a wider or narrower week label never moves the toggle. */
+.platform-ios .planner-tools{padding:2px 2px 12px;gap:8px;display:grid;grid-template-columns:minmax(0,1fr) auto auto}
+.platform-ios .planner-tools .week-picker{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.platform-ios .planner-tools .week-picker{font-size:25px;font-weight:700;letter-spacing:-.3px;color:var(--label);white-space:nowrap;gap:4px;font-variant-numeric:tabular-nums}
 .platform-ios .planner-tools .week-picker svg{color:var(--label-2)}
 .platform-ios .view-toggle{background:var(--fill);border-radius:10px;padding:2px}
 .platform-ios .view-toggle button{font-size:13px;font-weight:500;color:var(--label);border-radius:8px;padding:5px 10px;white-space:nowrap}

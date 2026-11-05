@@ -5,7 +5,7 @@ import {createShareEntry} from './share-entry.js';
 import {createUpdateUI} from './update-ui.js';
 import {createManagementUI} from './manage-ui.js';
 import {createExamUI} from './exams-ui.js';
-import {createShareUI} from './share-ui.js';
+import {createShareUI,shareBackup,shareBackupSummary,restoreShareBackup} from './share-ui.js';
 import {createLiveClock} from './live-clock.js';
 import {createBackgroundUI} from './background-ui.js';
 import {nextOccurrenceIds} from './course-live.js';
@@ -21,7 +21,7 @@ let state,storageError='',sharing,management,exams,motion,updater,shareEntry,bac
 try{state=loadState();}catch(e){storageError=e.message;state=createState();}
 const app=document.querySelector('#app');
 const tabHistory=[];
-let tab='table',week=1,threeStart=localDate(),occurrenceMap=new Map(),courseDraft=null,draftEditing=false,importPreview=null,restoreDraft=null,pdfBusy=false;
+let tab='table',week=1,threeStart=localDate(),occurrenceMap=new Map(),courseDraft=null,draftEditing=false,importPreview=null,restoreDraft=null,restoreSharing=null,pdfBusy=false;
 const semester=()=>state.semesters.find(s=>s.id===state.activeSemesterId)||state.semesters[0];
 const currentWeek=()=>getWeek(localDate(),semester().startDate);
 const importSemester=()=>state.semesters.find(s=>s.id===importTargetId)||semester();
@@ -139,9 +139,9 @@ function refreshPermissionRegion(){const el=document.querySelector('#notificatio
 function refreshNotificationStatus(){if(window.Android?.getNotificationStatus)try{notificationStatus=JSON.parse(Android.getNotificationStatus());refreshPermissionRegion();}catch{}}
 window.onNotificationStatus=s=>{notificationStatus=typeof s==='string'?JSON.parse(s):s;refreshPermissionRegion();};
 window.onScheduleSyncError=e=>toast(`提醒未保存：${e.message}`);
-function exportBackup(raw){const text=raw||(storageError?(localStorage.getItem(STATE_KEY)||localStorage.getItem('qingke.data.v1')):JSON.stringify(state,null,2));if(!text){toast('没有可导出的数据');return;}if(window.Android?.exportBackup){Android.exportBackup(text);return;}const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`清课备份-${localDate()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);toast('备份已生成');}
+function exportBackup(raw){const text=raw||(storageError?(localStorage.getItem(STATE_KEY)||localStorage.getItem('qingke.data.v1')):JSON.stringify({...state,sharing:shareBackup()||undefined},null,2));if(!text){toast('没有可导出的数据');return;}if(window.Android?.exportBackup){Android.exportBackup(text);return;}const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`清课备份-${localDate()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);toast('备份已生成');}
 function chooseBackup(){if(window.Android?.importBackup){Android.importBackup();return;}const picker=document.createElement('input');picker.type='file';picker.accept='.json,application/json';picker.onchange=async()=>{const f=picker.files[0];if(!f)return;if(f.size>5*1024*1024){toast('请选择 5MB 以内的备份');return;}window.onBackupLoaded(await f.text());};picker.click();}
-window.onBackupLoaded=raw=>{try{restoreDraft=migrateState(typeof raw==='string'?JSON.parse(raw):raw);sheet('恢复这份备份？',`<div class="helper-box">${restoreDraft.semesters.length} 个学期，${restoreDraft.semesters.reduce((n,s)=>n+s.courses.length,0)} 门课程。</div><p class="sheet-subtitle">恢复将替换当前全部学期。保存前会自动保留当前版本。</p><div class="sheet-actions">${button('export','先导出当前')}${button('confirm-restore','确认恢复','primary')}</div>`);}catch(e){toast(`备份无效：${e.message}`);}};
+window.onBackupLoaded=raw=>{try{const parsed=typeof raw==='string'?JSON.parse(raw):raw;restoreDraft=migrateState(parsed);restoreSharing=shareBackupSummary(parsed?.sharing)?parsed.sharing:null;const shared=shareBackupSummary(restoreSharing);sheet('恢复这份备份？',`<div class="helper-box">${restoreDraft.semesters.length} 个学期，${restoreDraft.semesters.reduce((n,s)=>n+s.courses.length,0)} 门课程。${shared?`<br>含 ${shared.shares} 个我创建的分享、${shared.follows} 个跟随的课表，恢复后可继续更新和撤销。`:''}</div><p class="sheet-subtitle">恢复将替换当前全部学期。保存前会自动保留当前版本。</p><div class="sheet-actions">${button('export','先导出当前')}${button('confirm-restore','确认恢复','primary')}</div>`);}catch(e){toast(`备份无效：${e.message}`);}};
 window.onBackupSaved=success=>{if(success)toast('备份已保存');};
 window.onNativeMessage=toast;
 function recoverySheet(){let list;try{list=recoveries();}catch{toast('恢复记录无法读取，请先导出当前备份');return;}sheet('恢复历史版本',`<p class="sheet-subtitle">保留重要升级版本和最近 4 次重要变更。文件仍在本机，卸载前请导出备份。</p>${list.map(r=>`<div class="change-row"><div><strong>${esc(r.label)}</strong><small>${new Date(r.at).toLocaleString('zh-CN')}</small></div>${button('recovery-restore','恢复','text-button',`data-id="${esc(r.id)}"`)}${button('recovery-export','导出','text-button',`data-id="${esc(r.id)}"`)}</div>`).join('')||'<p class="helper-box">暂时没有历史版本。</p>'}`);}
@@ -167,7 +167,7 @@ document.addEventListener('click',async event=>{
     case 'close':returnToImport=false;closeSheet();break;
     case 'sheet-back':goBack();break;
     case 'tab':if(tab!==el.dataset.tab){tabHistory.push({tab,scroll:window.scrollY});if(tabHistory.length>20)tabHistory.shift();tab=el.dataset.tab;render();window.scrollTo(0,0);motion.animateTab();}break;
-    case 'backup-menu':sheet('备份与恢复',`<p class="sheet-subtitle">文件备份可用于换机；历史版本用于撤销近期修改。</p>${settingRow('export','download','导出全部学期','保存为手机外也可留存的 JSON 文件')}${settingRow('restore','upload','从文件恢复','校验并确认后恢复全部学期')}${settingRow('recovery','undo','恢复历史版本','查看升级和重要修改前的记录')}`);break;
+    case 'backup-menu':sheet('备份与恢复',`<p class="sheet-subtitle">文件备份可用于换机；历史版本用于撤销近期修改。</p>${settingRow('export','download','导出全部学期','含分享管理凭证，换机后可继续更新分享；请勿发给他人')}${settingRow('restore','upload','从文件恢复','校验并确认后恢复全部学期')}${settingRow('recovery','undo','恢复历史版本','查看升级和重要修改前的记录')}`);break;
     case 'axis-help':sheet('各日作息',visibleDates().map(d=>{const p=getProfile(semester(),d);return `<div class="helper-box"><strong>${d} · ${esc(p.name)}</strong><p>${p.periods.map((t,i)=>`${i+1}节 ${t.start}–${t.end}`).join('<br>')}</p></div>`;}).join(''));break;
     case 'view':if(save({...state,preferences:{...state.preferences,viewMode:el.dataset.view}})){threeStart=week===clampWeek(currentWeek())?localDate():getWeekDates(semester().startDate,week)[0];render();}break;
     case 'prev':case 'next':navigatePage(action==='prev'?-1:1);break;
@@ -229,7 +229,7 @@ document.addEventListener('click',async event=>{
     case 'recovery':recoverySheet();break;
     case 'recovery-export':{const r=recoveries().find(r=>r.id===id);if(r)exportBackup(r.raw);break;}
     case 'recovery-restore':{const r=recoveries().find(r=>r.id===id);if(r)window.onBackupLoaded(r.raw);break;}
-    case 'confirm-restore':{if(!restoreDraft)break;const oldError=storageError;storageError='';if(save(restoreDraft,'恢复备份前')){week=clampWeek(currentWeek());threeStart=localDate();closeSheet();render();toast('全部学期已恢复');}else storageError=oldError;break;}
+    case 'confirm-restore':{if(!restoreDraft)break;const oldError=storageError;storageError='';if(save(restoreDraft,'恢复备份前')){const shared=restoreSharing?restoreShareBackup(restoreSharing,restoreDraft.semesters.map(s=>s.id)):null;restoreSharing=null;week=clampWeek(currentWeek());threeStart=localDate();closeSheet();render();toast(shared&&(shared.shares||shared.follows)?`全部学期已恢复，并接回 ${shared.shares} 个分享、${shared.follows} 个跟随`:'全部学期已恢复');}else storageError=oldError;break;}
   }}catch(e){toast(e.message);console.error(e);}
 });
 document.addEventListener('input',event=>{if(event.target.id==='course-search')document.querySelector('#course-results').innerHTML=courseList(event.target.value.trim());});

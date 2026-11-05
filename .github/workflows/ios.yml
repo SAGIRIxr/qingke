@@ -5,7 +5,7 @@ on:
     paths: ['ios/**', 'www/**', '.github/workflows/ios.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: macos-15
@@ -50,6 +50,19 @@ jobs:
           path: |
             qingke-*-ios-unsigned.ipa
             SHA256SUMS-ios
+      - name: Attach IPA to the release
+        # The release of the same version (v3.3.3 for MARKETING_VERSION 3.3.3) carries the latest iOS build.
+        if: github.ref == 'refs/heads/ios'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ipa=$(ls qingke-*-ios-unsigned.ipa)
+          version=${ipa#qingke-}; version=${version%-ios-unsigned.ipa}
+          if gh release view "v$version" >/dev/null 2>&1; then
+            gh release upload "v$version" "$ipa" SHA256SUMS-ios --clobber
+          else
+            echo "::warning::release v$version does not exist yet; IPA left as a workflow artifact"
+          fi
       - name: Simulator screenshots
         # Screenshots are a preview aid; a slow simulator must never block the IPA.
         timeout-minutes: 15

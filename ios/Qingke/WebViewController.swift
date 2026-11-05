@@ -13,6 +13,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     /// The page's current tab and whether a sheet is open, for the native tab bar.
     var onChrome: ((String, Bool) -> Void)?
     private var chromeInsets = ""
+    /// Returning jumps to the current week only after a real absence; closing the screenshot editor,
+    /// Control Center or a share sheet must leave the week the user was looking at.
+    private static let resetAfter: TimeInterval = 10 * 60
+    private var backgroundedAt: Date?
     private var webView: WKWebView!
     private let share = ShareTransport()
     private let inbox = ShareEntryInbox()
@@ -63,6 +67,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(didBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
         center.addObserver(self, selector: #selector(willResignActive), name: UIApplication.willResignActiveNotification, object: nil)
+        center.addObserver(self, selector: #selector(didEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         webView.load(URLRequest(url: AppSchemeHandler.startURL))
     }
 
@@ -77,13 +82,18 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     @objc private func didBecomeActive() {
         guard pageReady, !schoolOpen else { return }
-        webView.evaluateJavaScript("window.onAppForeground&&window.onAppForeground()", completionHandler: nil)
+        if let since = backgroundedAt, Date().timeIntervalSince(since) >= Self.resetAfter {
+            webView.evaluateJavaScript("window.onAppForeground&&window.onAppForeground()", completionHandler: nil)
+        }
+        backgroundedAt = nil
         NotificationScheduler.shared.reschedule { [weak self] _ in self?.pushNotificationStatus() }
         readShareClipboard()
         deliverShareEntries()
     }
 
     @objc private func willResignActive() { StorageMirror.shared.flush() }
+
+    @objc private func didEnterBackground() { backgroundedAt = Date() }
 
     private func initialNativeState() -> [String: Any] {
         ["version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",

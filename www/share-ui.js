@@ -21,6 +21,35 @@ function records(){
 }
 function writeRecords(list){localStorage.setItem(RECORD_KEY,JSON.stringify(list));memoryRecords=[];}
 
+const FOLLOW_KEY='qingke.follows.v1';
+const storedList=key=>{try{const v=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(v)?v:[];}catch{return [];}};
+const httpsServer=value=>{try{return endpoint(value)===value;}catch{return false;}};
+/** Share credentials and follow records travel inside a full backup, outside the timetable state, so a
+ * new phone can keep publishing to, revoking and following the same shares. */
+export function shareBackup(){
+  const shares=storedList(RECORD_KEY).filter(r=>r&&CODE.test(r.code)&&typeof r.deleteToken==='string');
+  const follows=storedList(FOLLOW_KEY).filter(r=>r&&typeof r.code==='string'&&typeof r.localSemesterId==='string');
+  return shares.length||follows.length?{format:'qingke-sharing',version:1,shares,follows}:null;
+}
+export function shareBackupSummary(data){
+  if(data?.format!=='qingke-sharing'||data.version!==1)return null;
+  return {shares:Array.isArray(data.shares)?data.shares.length:0,follows:Array.isArray(data.follows)?data.follows.length:0};
+}
+/** After a full restore: merge owned shares (the newer revision wins) and take the backup's follows,
+ * keeping only those whose semester came back with it. */
+export function restoreShareBackup(data,semesterIds){
+  if(!shareBackupSummary(data))return {shares:0,follows:0};
+  const ids=new Set(semesterIds),key=r=>`${r.server}|${r.code}`;
+  const shares=(Array.isArray(data.shares)?data.shares:[]).filter(r=>r&&CODE.test(r.code)&&typeof r.deleteToken==='string'&&r.deleteToken.length<=500&&httpsServer(r.server)&&new Date(r.expiresAt).getTime()>Date.now()).slice(0,100);
+  const follows=(Array.isArray(data.follows)?data.follows:[]).filter(r=>r&&CODE.test(r.code)&&httpsServer(r.server)&&ids.has(r.localSemesterId)).slice(0,30);
+  let current=[];try{current=records();}catch{}
+  const merged=new Map(current.map(r=>[key(r),r]));
+  for(const r of shares){const old=merged.get(key(r));if(!old||Number(r.revision||0)>=Number(old.revision||0))merged.set(key(r),r);}
+  writeRecords([...merged.values()]);
+  localStorage.setItem(FOLLOW_KEY,JSON.stringify(follows));
+  return {shares:shares.length,follows:follows.length};
+}
+
 /** Only the chosen semester leaves this device; import metadata and private preferences never do. */
 export function sharePayload(semester,{includeNotes=false,includeExams=false,expiresInDays=7}={}){
   const s=clone(semester);
