@@ -171,6 +171,21 @@ class ShareTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             self.app.client_ip(env)
 
+    def test_cloudflare_client_ip_only_from_a_cloudflare_edge(self):
+        self.config.trust_proxy = True
+        edge = {'REMOTE_ADDR': '127.0.0.1', 'HTTP_X_REAL_IP': '172.68.193.164', 'HTTP_CF_CONNECTING_IP': '203.0.113.7'}
+        self.assertEqual(self.app.client_ip(edge), '203.0.113.7')
+        self.assertEqual(self.app.client_ip({**edge, 'HTTP_X_REAL_IP': '2606:4700::1', 'HTTP_CF_CONNECTING_IP': '2001:db8::5'}), '2001:db8::5')
+        # A direct-to-origin peer cannot choose its own client address with the Cloudflare header.
+        direct = {**edge, 'HTTP_X_REAL_IP': '198.51.100.9'}
+        self.assertEqual(self.app.client_ip(direct), '198.51.100.9')
+        self.assertEqual(self.app.client_ip({'REMOTE_ADDR': '127.0.0.1', 'HTTP_X_REAL_IP': '172.68.193.164'}), '172.68.193.164')
+        self.config.trust_proxy = False
+        self.assertEqual(self.app.client_ip(edge), '127.0.0.1')
+        self.config.trust_proxy = True
+        with self.assertRaises(ApiError):
+            self.app.client_ip({**edge, 'HTTP_CF_CONNECTING_IP': '203.0.113.7, 1.1.1.1'})
+
     def test_expiry_cleanup_and_capacity_limits(self):
         payload, _ = normalize_payload(fixture())
         created = self.app.store.create(payload, 1, now=100)

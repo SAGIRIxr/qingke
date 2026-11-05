@@ -26,7 +26,8 @@ export function createFollowManager(ctx,api){
   }
   function subscribe(draft){
     if(!draft.allowFollow)throw Error('分享者没有允许跟随更新');
-    const items=list().filter(r=>r.localSemesterId!==draft.semester.id);if(items.length>=30)throw Error('最多跟随 30 个学期');
+    // Follows of deleted semesters no longer count toward the limit.
+    const items=list().filter(r=>r.localSemesterId!==draft.semester.id&&findLocal(r.localSemesterId));if(items.length>=30)throw Error('最多跟随 30 个学期');
     items.push({localSemesterId:draft.semester.id,server:draft.server,code:draft.code,revision:draft.revision,map:draft.map,baseline:clone(draft.semester),enabled:true,lastSyncedAt:new Date().toISOString(),expiresAt:draft.expiresAt,error:'',pending:null});store(items);
   }
   function showList(){

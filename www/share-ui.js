@@ -2,7 +2,7 @@ import {createFollowManager} from './share-follow.js';
 import {shareMessage,parseShareInput,shareCode,shareServer,prettyCode} from './share-links.js';
 import {uid,validateState,createState} from './engine.js';
 import {esc,clone,icon,button,field,input,select,submit,sheet,closeSheet,toast} from './ui.js';
-import {newTransferCode,normalizeTransferCode,sealTransfer,openTransfer,transferId} from './transfer-seal.js';
+import {newTransferCode,normalizeTransferCode,sealTransfer,openTransfer,transferId,sha256} from './transfer-seal.js';
 
 const RECORD_KEY='qingke.shares.v1';
 const CODE=/^[0-9A-HJKMNP-TV-Z]{20}$/;
@@ -26,6 +26,17 @@ const FOLLOW_KEY='qingke.follows.v1';
 const storedList=key=>{try{const v=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(v)?v:[];}catch{return [];}};
 const httpsServer=value=>{try{return endpoint(value)===value;}catch{return false;}};
 const validShare=r=>r&&CODE.test(r.code)&&typeof r.deleteToken==='string'&&r.deleteToken.length<=500&&httpsServer(r.server)&&new Date(r.expiresAt).getTime()>Date.now();
+/** Records arriving from a backup file or a transfer code keep only known fields with their types. */
+function cleanShare(r){
+  const text=(value,max)=>typeof value==='string'?value.slice(0,max):'',flag=value=>value===true;
+  return {code:r.code,deleteToken:r.deleteToken,expiresAt:r.expiresAt,server:r.server,name:text(r.name,120)||'未命名学期',
+    createdAt:text(r.createdAt,40)||new Date().toISOString(),localSemesterId:text(r.localSemesterId,120),
+    revision:Number.isSafeInteger(r.revision)&&r.revision>0?r.revision:1,allowFollow:flag(r.allowFollow),autoPublish:flag(r.autoPublish),
+    includeNotes:flag(r.includeNotes),includeExams:flag(r.includeExams),lastFingerprint:text(r.lastFingerprint,4*1024*1024),
+    lastPublishedAt:text(r.lastPublishedAt,40),...(typeof r.handedOffAt==='string'?{handedOffAt:r.handedOffAt.slice(0,40)}:{})};
+}
+const MAX_TRANSFER=128*1024;
+const fingerprintDigest=text=>text?[...sha256(new TextEncoder().encode(text))].map(b=>b.toString(16).padStart(2,'0')).join(''):'';
 /** Share credentials and follow records travel inside a full backup, outside the timetable state, so a
  * new phone can keep publishing to, revoking and following the same shares. */
 export function shareBackup(){
@@ -42,7 +53,7 @@ export function shareBackupSummary(data){
 export function restoreShareBackup(data,semesterIds){
   if(!shareBackupSummary(data))return {shares:0,follows:0};
   const ids=new Set(semesterIds),key=r=>`${r.server}|${r.code}`;
-  const shares=(Array.isArray(data.shares)?data.shares:[]).filter(validShare).slice(0,100);
+  const shares=(Array.isArray(data.shares)?data.shares:[]).filter(validShare).slice(0,100).map(cleanShare);
   const follows=(Array.isArray(data.follows)?data.follows:[]).filter(r=>r&&CODE.test(r.code)&&httpsServer(r.server)&&ids.has(r.localSemesterId)).slice(0,30);
   let current=[];try{current=records();}catch{}
   const merged=new Map(current.map(r=>[key(r),r]));
@@ -205,7 +216,11 @@ export function createShareUI(ctx){
   }
   async function makeTransfer(el){
     const list=transferable();if(!list.length)throw Error('没有可转移的分享');
-    const code=newTransferCode(),sealed=sealTransfer(code,{format:'qingke-transfer',version:1,createdAt:new Date().toISOString(),shares:list});
+    // The publish fingerprint is the whole semester as text; a digest is enough to tell on the new
+    // phone whether its copy already matches what was last published.
+    const shares=list.map(r=>{const {lastFingerprint,...rest}=cleanShare(r);return {...rest,fingerprintDigest:fingerprintDigest(lastFingerprint)};});
+    const code=newTransferCode(),sealed=sealTransfer(code,{format:'qingke-transfer',version:1,createdAt:new Date().toISOString(),shares});
+    if(sealed.data.length>MAX_TRANSFER)throw Error('分享记录太多，换机码装不下；请先撤销不再使用的分享');
     const view=currentView();busy=true;el.disabled=true;
     try{
       const result=await request(server(),'transfer-create',sealed);
@@ -216,18 +231,22 @@ export function createShareUI(ctx){
   }
   async function redeemTransfer(value){
     const code=normalizeTransferCode(value),view=currentView();
-    const {data}=await request(server(),'transfer-get',{id:transferId(code)});
+    let data;
+    try{({data}=await request(server(),'transfer-get',{id:transferId(code)}));}
+    catch(e){if(e.status===404)throw Error('换机码不存在、已使用或已过期。可在旧手机「管理我创建的分享」点「收回到本机」后重新生成');throw e;}
     const payload=openTransfer(code,data);
     if(payload?.format!=='qingke-transfer'||payload.version!==1||!Array.isArray(payload.shares))throw Error('换机数据格式不受支持');
-    const semesters=state().semesters,incoming=payload.shares.filter(validShare).slice(0,100);let linked=0,named=0;
+    const semesters=state().semesters,incoming=payload.shares.filter(validShare).slice(0,100).map(r=>({...cleanShare(r),digest:typeof r.fingerprintDigest==='string'?r.fingerprintDigest:''}));let linked=0,named=0;
     const received=incoming.map(r=>{
       // Same id: the timetable came over by backup. A unique name match is linked but stays paused
       // until the owner checks it and publishes once, so a wrong match never reaches followers.
       let local=semesters.find(s=>s.id===r.localSemesterId),how='id';
       if(!local){const same=semesters.filter(s=>s.name===r.name);if(same.length===1){local=same[0];how='name';}}
       if(local){if(how==='id')linked++;else named++;}
-      const {handedOffAt,transferNote,error,...rest}=r;
-      return {...rest,localSemesterId:local?.id||'',autoPublish:how==='id'&&!!local&&r.allowFollow===true,
+      const {handedOffAt,digest,...rest}=r;
+      // Unchanged since the last publish: keep the fingerprint so nothing is republished on arrival.
+      const current=local&&how==='id'?follow.initialFingerprint(sharePayload(local,{includeNotes:r.includeNotes,includeExams:r.includeExams}).semester):'';
+      return {...rest,lastFingerprint:current&&fingerprintDigest(current)===digest?current:'',localSemesterId:local?.id||'',autoPublish:how==='id'&&!!local&&r.allowFollow===true,
         transferNote:!local?'本机还没有这份课表：点「导入这份课表」从分享取回':how==='name'?'已按学期名称关联：核对后点「发布最新修改」恢复自动更新':''};
     });
     const merged=new Map(records().map(r=>[shareKey(r),r]));received.forEach(r=>merged.set(shareKey(r),r));writeRecords([...merged.values()]);

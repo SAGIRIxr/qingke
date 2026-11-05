@@ -29,3 +29,12 @@ test('恢复只接回有效记录：跟随的学期必须随备份恢复，过�
   assert.equal(shareBackupSummary({format:'other'}),null);
   assert.equal(shareBackup().follows.length,0);
 });
+test('恢复与换机传入的分享记录只保留已知字段，类型不对的布尔和版本被纠正',()=>{
+  store.clear();
+  const data={format:'qingke-sharing',version:1,shares:[{...owned,includeNotes:'yes',allowFollow:1,revision:'99',autoPublish:true,evil:'<img>',__proto__x:1}],follows:[]};
+  restoreShareBackup(data,['s1']);
+  const [r]=JSON.parse(store.get('qingke.shares.v1'));
+  assert.equal(r.evil,undefined);assert.equal(r.__proto__x,undefined);
+  assert.equal(r.includeNotes,false);assert.equal(r.allowFollow,false);assert.equal(r.revision,1);assert.equal(r.autoPublish,true);
+  assert.equal(r.deleteToken,'secret-token');
+});

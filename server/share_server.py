@@ -27,6 +27,14 @@ MAX_BODY = 1024 * 1024
 # Device-transfer blobs: share credentials sealed on the phone with a key derived from the transfer
 # code. The server sees a one-way id and ciphertext only; a blob is read once and lives 24 hours.
 TRANSFER_SECONDS = 24 * 3600
+# Cloudflare edge ranges (https://www.cloudflare.com/ips/, checked 2026-11-05). The local proxy
+# overwrites X-Real-IP with the TCP peer, so a peer inside these ranges is a Cloudflare edge and its
+# CF-Connecting-IP is the real client; Cloudflare refuses client-supplied copies of that header.
+CLOUDFLARE_NETWORKS = tuple(ipaddress.ip_network(net) for net in (
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+    '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+    '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22', '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32',
+    '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32'))
 MAX_TRANSFER_DATA = 128 * 1024
 SITE_ROOT = Path(__file__).resolve().with_name('site')
 # Exact route-to-file mapping; request paths are never used as filesystem paths.
@@ -60,7 +68,8 @@ class Config:
         'global_request': (600, 60), 'global_create': (200, 3600), 'global_update': (600, 3600),
         'transfer_create': (10, 3600), 'transfer_read': (20, 3600), 'global_transfer_create': (200, 3600),
     })
-    max_transfers: int = 2000
+    # 500 x 128 KB stays well inside max_db_bytes next to the share payload budget.
+    max_transfers: int = 500
 
     @classmethod
     def from_env(cls):
@@ -286,7 +295,10 @@ class ShareApp:
             if self.config.trust_proxy and peer.is_loopback and 'HTTP_X_REAL_IP' in env:
                 # Exactly one address, never X-Forwarded-For chains or arbitrary
                 # proxy headers supplied by an external network peer.
-                return str(ipaddress.ip_address(env['HTTP_X_REAL_IP']))
+                real = ipaddress.ip_address(env['HTTP_X_REAL_IP'])
+                if 'HTTP_CF_CONNECTING_IP' in env and any(real in net for net in CLOUDFLARE_NETWORKS):
+                    return str(ipaddress.ip_address(env['HTTP_CF_CONNECTING_IP']))
+                return str(real)
             return str(peer)
         except ValueError:
             raise ApiError(400, 'invalid_request', '请求来源格式无效') from None
