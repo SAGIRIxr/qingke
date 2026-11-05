@@ -168,8 +168,15 @@ test('服务器关闭跟随或撤销分享时保留本地副本',async t=>{
   revoked=true;await manager.sync(true);assert.equal(env.saved,0);assert.match(manager.list()[0].error,/撤销/);assert.equal(env.state.semesters[0].name,draft.semester.name);
 });
 
+const withCourse=env=>{const s=env.state.semesters[0];s.courses=[{id:'c1',name:'高等数学',shortName:'',color:0,assessment:'未设置',nature:'',note:'',sessions:[{id:'t1',day:1,startPeriod:1,endPeriod:2,weeks:[1,2],teacher:'',location:'A101',breakMode:'normal'}]}];};
+test('所有者的学期为空时不在后台发布，免得清空朋友的副本',async t=>{
+  const env=environment(t);let record=owner(env),requests=0;
+  const manager=createFollowManager(env.ctx,{records:()=>[record],writeRecords:items=>record=items[0],sharePayload,request:async()=>{requests++;return {};},showOwners(){}});
+  await manager.sync();assert.equal(requests,0);assert.match(record.error,/空的/);
+});
+
 test('所有者遇到不同远端版本时只记录冲突，不盲目重试覆盖',async t=>{
-  const env=environment(t);let record=owner(env),updates=0;
+  const env=environment(t);withCourse(env);let record=owner(env),updates=0;
   const manager=createFollowManager(env.ctx,{records:()=>[record],writeRecords:items=>record=items[0],sharePayload,request:async(server,action,payload)=>{if(action==='update'){updates++;assert.equal(payload.expectedRevision,1);throw Object.assign(Error('conflict'),{status:409});}return remote({...env.state.semesters[0],name:'另一设备修改'},2);}});
   await manager.sync();assert.equal(updates,1);assert.equal(record.revision,1);assert.match(record.error,/云端已有另一份修改/);assert.equal(env.saved,0);
 });

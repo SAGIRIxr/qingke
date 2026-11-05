@@ -111,8 +111,32 @@ export function createShareUI(ctx){
   const state=()=>ctx.getState();
   const server=()=>state().preferences.shareServerUrl||'https://qk.sagiri.org';
   const follow=createFollowManager(ctx,{request,sharePayload,records,writeRecords,showOwners:manage});
+  const row=(action,i,title,description,attrs='')=>`<button type="button" class="setting-row" data-action="${action}" ${attrs}><span class="setting-icon">${icon(i)}</span><span class="row-text"><strong>${title}</strong>${description?`<small>${description}</small>`:''}</span>${icon('right',15)}</button>`;
+  const group=(name,content)=>`<section class="settings-section">${name?`<h2>${name}</h2>`:''}<div class="setting-group">${content}</div></section>`;
+  const recordAttrs=r=>`data-code="${r.code}" data-server="${esc(r.server)}"`;
+  const localOf=r=>r.localSemesterId?state().semesters.find(s=>s.id===r.localSemesterId)||null:null;
+  const isEmpty=s=>!s.courses.length&&!(s.exams||[]).length;
+  const expired=r=>new Date(r.expiresAt).getTime()<=Date.now();
+  // No local semester, or linked to an empty one (e.g. a fresh install's blank semester).
+  const needsTimetable=r=>{const s=localOf(r);return !s||isEmpty(s);};
+  const needsAttention=r=>!expired(r)&&!!(r.handedOffAt||needsTimetable(r)||r.error||r.transferNote);
+  function statusText(r){
+    if(expired(r))return '已到期';
+    if(r.handedOffAt)return '已移交到其他设备';
+    if(needsTimetable(r))return localOf(r)?'关联的学期是空的，需要取回课表':'本机没有这份课表，需要取回';
+    if(r.error)return r.error;
+    if(r.transferNote)return '待确认：发布一次后恢复自动更新';
+    return r.allowFollow?`持续分享中 · 版本 ${r.revision||1}`:`单次分享 · ${new Date(r.expiresAt).toLocaleDateString('zh-CN')} 到期`;
+  }
   function home(){
-    sheet('口令分享课表',`<p class="sheet-subtitle">分享一个学期，对方输入口令后预览并导入。分享会上传你确认的课表内容。</p><form id="share-server-form">${field('分享服务地址',input('server',server(),'url','required maxlength="500" placeholder="https://课表分享域名"'),'填写部署好的 HTTPS 域名。')}<button type="submit" class="secondary full-width">保存服务地址</button><div class="error-message" id="form-error" role="alert"></div></form><div class="sheet-actions">${button('share-create',`${icon('upload',17)} 分享我的课表`,'primary')}${button('share-receive',`${icon('download',17)} 输入口令导入`)}</div>${button('follow-list','我跟随的课表与同步状态','secondary full-width','style="margin-top:16px"')}${button('share-manage','管理我创建的分享','text-button full-width','style="margin-top:16px"')}${button('transfer-home','换手机：转移我创建的分享','text-button full-width')}${button('share-entry-settings','分享链接与剪贴板识别','text-button full-width')}<p class="source-note" style="margin-top:14px">持有口令的人可读取这份课表，请只发给需要的人。可设置到期时间或主动撤销。只有双方选择持续更新与跟随时，之后的修改才会同步。</p>`);
+    let owned=[],followed=0;
+    try{owned=records();}catch{}
+    try{followed=follow.list().filter(r=>state().semesters.some(s=>s.id===r.localSemesterId)).length;}catch{}
+    const pending=owned.filter(needsAttention).length;
+    sheet('分享课表',`<p class="sheet-subtitle">把一个学期分享给朋友，或输入朋友的口令导入。</p><div class="sheet-actions">${button('share-create',`${icon('upload',17)} 分享我的课表`,'primary')}${button('share-receive',`${icon('download',17)} 输入口令导入`)}</div>${group('我的分享',row('share-manage','upload','我创建的分享',`${owned.length} 个${pending?` · ${pending} 个需要处理`:''}`)+row('follow-list','download','我跟随的课表',followed?`${followed} 个 · 打开 App 时检查更新`:'导入朋友的分享时可选择跟随'))}${group('更多',row('transfer-home','swap','换手机','用换机码把我创建的分享转到新手机')+row('share-server','settings','分享服务',esc(new URL(server()).hostname))+row('share-entry-settings','note','链接与剪贴板','打开分享链接、识别剪贴板中的口令'))}<p class="source-note">持有口令的人可读取这份课表，请只发给需要的人。可设置到期时间或主动撤销。只有双方选择持续更新与跟随时，之后的修改才会同步。</p>`);
+  }
+  function serverForm(){
+    sheet('分享服务',`<form id="share-server-form">${field('分享服务地址',input('server',server(),'url','required maxlength="500" placeholder="https://课表分享域名"'),'填写部署好的 HTTPS 域名。换机时两台手机需使用同一个服务。')}${submit('保存服务地址')}</form>${button('share-home','返回','text-button full-width')}`);
   }
   function createForm(){
     endpoint(server());
@@ -134,19 +158,38 @@ export function createShareUI(ctx){
     const s=receiveDraft.semester;
     sheet('预览分享课表',`<form id="share-import-form">${field('新学期名称',input('name',s.name,'text','required maxlength="80"'))}<div class="share-summary"><p>${s.startDate} 开始 · ${s.totalWeeks} 周</p><p>${s.courses.length} 门课程 · ${s.exams.length} 场考试 · ${s.profiles.length} 套作息</p></div><div class="share-course-preview">${s.courses.map(c=>`<p><strong>${esc(c.name)}</strong><small>${c.sessions.map(t=>esc(t.location||'地点待定')).join(' / ')}</small></p>`).join('')}</div><p class="helper-box">导入后保存为独立学期。请核对学校校历和作息，原有学期不会被覆盖。</p>${receiveDraft.allowFollow?'<label class="check-row"><input type="checkbox" name="follow" checked><span><strong>跟随分享者的后续更新</strong><small>导入后开启，可取消勾选。打开 App 或回到前台时检查，保留我自己的修改，有冲突先核对。</small></span></label>':'<p class="source-note">分享者未开启持续更新，将导入当前副本。</p>'}${submit('导入为新学期')}</form>`);
   }
-  const linkedSemester=r=>!!r.localSemesterId&&state().semesters.some(s=>s.id===r.localSemesterId);
+  /** One row per share; everything else lives on the share's own page, with the one action that
+   * share needs right now shown first. */
   function manage(){
-    const list=records().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-    sheet('我创建的分享',`<p class="sheet-subtitle">持续分享会在前台联网时发布修改；朋友需自行选择跟随。撤销口令不会远程删除已导入的本地副本。</p>${list.map(r=>`<div class="change-row" style="display:block"><strong>${esc(r.name)}</strong><small>${displayCode(r.code)} · 版本 ${r.revision||1}<br>${new Date(r.expiresAt).getTime()<=Date.now()?'已到期':`有效至 ${esc(new Date(r.expiresAt).toLocaleDateString('zh-CN'))}`}<br>${esc(new URL(r.server).hostname)}</small><p class="follow-status">${r.allowFollow?'允许持续跟随':'单次课表副本'}${r.handedOffAt?'<br>已移交到其他设备：本机不再自动发布':r.transferNote?`<br>${esc(r.transferNote)}`:''}${r.error?`<br>${esc(r.error)}`:''}</p><div class="follow-actions">${button('share-show','查看 / 分享口令','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${linkedSemester(r)?`${button('owner-publish-now','发布最新修改','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${button('owner-toggle-follow',r.allowFollow?'关闭持续跟随':'开启持续跟随','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}`:''}${r.handedOffAt?button('transfer-reclaim','收回到本机','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`):''}${!linkedSemester(r)?`${new Date(r.expiresAt).getTime()>Date.now()?button('transfer-adopt','导入这份课表','primary',`data-code="${r.code}" data-server="${esc(r.server)}"`):''}${button('transfer-link','关联当前学期','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}`:''}${button('share-revoke','撤销分享','text-button',`data-code="${r.code}" data-server="${esc(r.server)}"`)}</div></div>`).join('')||'<p class="helper-box">还没有在这台设备上创建过分享。</p>'}${button('share-home','返回','secondary full-width','style="margin-top:18px"')}`);
+    const list=records().sort((a,b)=>Number(needsAttention(b))-Number(needsAttention(a))||b.createdAt.localeCompare(a.createdAt));
+    sheet('我创建的分享',`${list.length?group('',list.map(r=>row('share-detail',needsAttention(r)?'bell':'upload',esc(r.name),`${displayCode(r.code)}<br>${esc(statusText(r))}`,recordAttrs(r))).join('')):'<p class="helper-box">还没有在这台设备上创建过分享。</p>'}<p class="source-note">持续分享会在 App 前台联网时自动发布修改；撤销口令不会删除朋友已导入的副本。</p>${button('share-home','返回','secondary full-width')}`);
   }
+  function detail(r){
+    const a=recordAttrs(r),local=localOf(r),live=!expired(r),active=state().semesters.find(s=>s.id===state().activeSemesterId);
+    const publishable=live&&local&&!isEmpty(local)&&!r.handedOffAt;
+    let primary='';
+    if(live&&needsTimetable(r))primary=button('transfer-adopt',`${icon('download',17)} 从分享取回课表`,'primary full-width',a);
+    else if(r.handedOffAt)primary=button('transfer-reclaim','收回到本机','primary full-width',a);
+    else if(publishable&&(r.transferNote||r.error))primary=button('owner-publish-now','发布最新修改','primary full-width',a);
+    const rows=[row('share-show','upload','查看 / 发送口令',displayCode(r.code),a)];
+    if(publishable&&!primary)rows.push(row('owner-publish-now','upload','发布最新修改','把本机这个学期发布到分享',a));
+    if(publishable)rows.push(row('owner-toggle-follow','swap',r.allowFollow?'关闭持续跟随':'开启持续跟随',r.allowFollow?'朋友保留现有副本，不再收到更新':'允许朋友跟随之后的修改',a));
+    if(active&&!isEmpty(active)&&active.id!==local?.id&&(!local||isEmpty(local)))rows.push(row('transfer-link','calendar','改用当前学期',`把这份分享关联到「${esc(active.name)}」`,a));
+    const note=r.handedOffAt?'这份分享已移交到其他设备，本机不再自动发布。没用上换机码时可收回。':needsTimetable(r)&&live?`${local?`关联的「${esc(local.name)}」是空学期。`:'本机还没有这份课表。'}取回后会用分享里的课程替换，并恢复自动更新；分享时未包含的备注、考试不会恢复。`:r.transferNote||r.error?esc(r.transferNote||r.error):'';
+    sheet('分享详情',`<div class="share-summary"><strong>${esc(r.name)}</strong><p>${esc(statusText(r))}</p><p>${live?`有效至 ${esc(new Date(r.expiresAt).toLocaleDateString('zh-CN'))}`:'已到期'} · ${esc(new URL(r.server).hostname)}</p>${local?`<p>本机学期：${esc(local.name)}${isEmpty(local)?'（空）':''}</p>`:''}</div>${note?`<p class="helper-box">${note}</p>`:''}${primary}${group('',rows.join(''))}${button('share-revoke','撤销分享','text-button full-width',a)}${button('share-manage','返回','secondary full-width')}`);
+  }
+  // After an action, come back to the same share when it still exists.
+  const reopen=record=>{const r=records().find(x=>shareKey(x)===shareKey(record));if(r)detail(r);else manage();};
   async function click(action,el){
     if(await follow.click(action,el))return true;
-    if(!['share-home','share-create','share-receive','share-manage','share-publish','share-copy','share-show','share-system','share-revoke','share-revoke-confirm','transfer-home','transfer-out','transfer-make','transfer-in','transfer-copy','transfer-reclaim','transfer-link','transfer-adopt'].includes(action))return false;
+    if(!['share-home','share-create','share-receive','share-manage','share-detail','share-server','share-publish','share-copy','share-show','share-system','share-revoke','share-revoke-confirm','transfer-home','transfer-out','transfer-make','transfer-in','transfer-copy','transfer-reclaim','transfer-link','transfer-adopt'].includes(action))return false;
     if(busy){toast('正在处理分享请求，请稍候');return true;}
     if(action==='share-home')home();
     if(action==='share-create')createForm();
     if(action==='share-receive')receiveForm();
     if(action==='share-manage')manage();
+    if(action==='share-server')serverForm();
+    if(action==='share-detail'){const record=records().find(r=>r.code===el.dataset.code&&r.server===el.dataset.server);if(!record)throw Error('找不到这份分享，请重新打开分享管理');detail(record);return true;}
     if(action.startsWith('transfer-')){await transferClick(action,el);return true;}
     if(['share-copy','share-show','share-system'].includes(action)){
       const record=records().find(r=>r.code===el.dataset.code&&r.server===el.dataset.server);if(!record)throw Error('找不到这份分享，请重新打开分享管理');
@@ -174,7 +217,7 @@ export function createShareUI(ctx){
     }
     if(action==='share-revoke'){
       deleteDraft=records().find(r=>r.code===el.dataset.code&&r.server===el.dataset.server);if(!deleteDraft)throw Error('没有这条分享的管理凭证');
-      sheet('撤销分享？',`<p class="helper-box">撤销「${esc(deleteDraft.name)}」的分享口令 ${displayCode(deleteDraft.code)}。</p><div class="sheet-actions">${button('share-manage','返回')}${button('share-revoke-confirm','确认撤销','danger')}</div>`);
+      sheet('撤销分享？',`<p class="helper-box">撤销「${esc(deleteDraft.name)}」的分享口令 ${displayCode(deleteDraft.code)}。朋友已导入的副本不受影响，但之后无法再读取或跟随这个口令。</p><div class="sheet-actions">${button('share-detail','返回',undefined,recordAttrs(deleteDraft))}${button('share-revoke-confirm','确认撤销','danger')}</div>`);
     }
     if(action==='share-revoke-confirm'){
       if(!deleteDraft)return true;const r=deleteDraft,view=currentView();busy=true;el.disabled=true;
@@ -261,16 +304,20 @@ export function createShareUI(ctx){
     try{
       const remote=await request(record.server,'get',{code:record.code});
       if(remote?.format!=='qingke-semester'||remote.version!==1||!remote.semester)throw Error('分享内容不是支持的课表格式');
+      if(!remote.semester.courses?.length&&!remote.semester.exams?.length)throw Error('云端分享里也没有课程（可能已发布过空课表）。请在仍有这份课表的手机上发布一次，或恢复备份后用「改用当前学期」再发布');
       const s=validateState({...createState(),semesters:[remote.semester],activeSemesterId:remote.semester.id}).semesters[0],current=state();
-      if(current.semesters.some(x=>x.id===s.id))throw Error('本机已有这个学期，请打开它后点「关联当前学期」');
-      // A fresh install starts with one empty semester; replace it instead of keeping a blank tab.
-      const blank=current.semesters.length===1&&!current.semesters[0].courses.length&&!(current.semesters[0].exams||[]).length&&!records().some(r=>r.localSemesterId===current.semesters[0].id);
-      if(!ctx.save({...current,semesters:blank?[s]:[...current.semesters,s],activeSemesterId:s.id},'导入自己的分享前'))return;
+      // A share linked to an empty semester (a fresh install's blank one, linked by mistake) gets that
+      // semester replaced in place; otherwise the semester is added, replacing a lone blank one.
+      const linked=localOf(record),replacing=linked&&isEmpty(linked)?linked:null;
+      if(current.semesters.some(x=>x.id===s.id&&x.id!==replacing?.id))throw Error('本机已有这个学期，请打开它后点「改用当前学期」');
+      const lone=current.semesters.length===1&&isEmpty(current.semesters[0])&&!records().some(r=>r.localSemesterId===current.semesters[0].id);
+      const semesters=replacing?current.semesters.map(x=>x.id===replacing.id?s:x):lone?[s]:[...current.semesters,s];
+      if(!ctx.save({...current,semesters,activeSemesterId:s.id},'从分享取回课表前'))return;
       const fingerprint=follow.initialFingerprint(sharePayload(s,{includeNotes:record.includeNotes===true,includeExams:record.includeExams===true}).semester);
       writeRecords(records().map(r=>shareKey(r)!==shareKey(record)?r:{...r,localSemesterId:s.id,name:s.name,revision:Number(remote.revision)||r.revision,
-        autoPublish:r.allowFollow===true&&remote.allowFollow===true,lastFingerprint:fingerprint,transferNote:''}));
-      ctx.refresh();manage();
-      toast(`已导入「${s.name}」并关联分享${record.includeNotes&&record.includeExams?'':'；分享时未包含的备注或考试不会恢复'}`);
+        autoPublish:r.allowFollow===true&&remote.allowFollow===true,lastFingerprint:fingerprint,transferNote:'',error:''}));
+      ctx.refresh();reopen(record);
+      toast(`已取回「${s.name}」并关联分享${record.includeNotes&&record.includeExams?'':'；分享时未包含的备注或考试不会恢复'}`);
     }finally{busy=false;el.disabled=false;}
   }
   async function transferClick(action,el){
@@ -286,11 +333,13 @@ export function createShareUI(ctx){
     if(action==='transfer-adopt'){await adoptShare(record,el);return true;}
     if(action==='transfer-reclaim'){
       patch({autoPublish:false,transferNote:'已收回：核对后点「发布最新修改」恢复自动更新'});
-      manage();toast('已收回。若另一台手机也接手了，请只在一台上发布');return true;
+      reopen(record);toast('已收回。若另一台手机也接手了，请只在一台上发布');return true;
     }
     const active=state().semesters.find(s=>s.id===state().activeSemesterId);
+    // Linking an empty semester and publishing it would empty the friends' copies.
+    if(!active||isEmpty(active))throw Error('当前学期是空的，不能关联。请用「从分享取回课表」，或先打开有课程的学期');
     patch({localSemesterId:active.id,autoPublish:false,transferNote:`已关联「${active.name}」：核对后点「发布最新修改」恢复自动更新`});
-    manage();return true;
+    reopen(record);return true;
   }
   function change(target){if(target.closest('#share-create-form')&&target.name==='allowFollow'){const el=document.querySelector('#share-create-form [name="expiresInDays"]');const values=target.checked?[[7,'7 天'],[30,'30 天'],[180,'180 天'],[365,'365 天']]:[[1,'1 天'],[7,'7 天'],[30,'30 天']];el.innerHTML=values.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');el.value=target.checked?'180':'7';return true;}return false;}
   return {click,submit:submitForm,change,home,isOwnShare:entry=>records().some(r=>r.code===entry.code&&r.server===entry.server),openShare:entry=>receiveForm({code:shareCode(entry.code),server:shareServer(entry.server),source:entry.source}),onStateSaved:follow.schedule,onForeground:follow.foreground};

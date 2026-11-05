@@ -70,6 +70,8 @@ export function createFollowManager(ctx,api){
   async function checkOwner(record){
     if(!record.allowFollow||record.autoPublish===false||!record.localSemesterId||!findLocal(record.localSemesterId))return;
     const payload=ownerPayload(record);if(stable(payload.semester)===record.lastFingerprint)return;
+    // Never empty the friends' copies in the background (e.g. a share linked to a fresh blank semester).
+    if(!payload.semester.courses.length&&!payload.semester.exams.length){patchOwner(record,{error:'本机学期是空的，已暂停自动发布'});return;}
     try{await publish(record,payload,record.revision||1);}
     catch(error){
       if(error.status===409){const remote=await api.request(record.server,'get',{code:record.code});if(stable(remote.semester)===stable(payload.semester)&&remote.allowFollow===payload.allowFollow){patchOwner(record,{revision:remote.revision,lastFingerprint:stable(payload.semester),lastPublishedAt:new Date().toISOString(),expiresAt:remote.expiresAt,error:''});return;}throw Error('云端已有另一份修改，请在分享管理中核对后重新发布');}
@@ -99,7 +101,8 @@ export function createFollowManager(ctx,api){
     const allowFollow=toggle?!record.allowFollow:record.allowFollow===true&&remote.allowFollow===true;
     const payload=ownerPayload(record,allowFollow);if(toggle&&allowFollow)payload.expiresInDays=180;
     ownerDraft={record,payload,expectedRevision:remote.revision};
-    sheet(toggle?(allowFollow?'允许朋友持续跟随？':'暂停分享更新？'):'发布最新课表？',`<p class="helper-box">${esc(payload.semester.name)}<br>${allowFollow?'允许导入者选择跟随，之后本机修改会在 App 前台联网时自动发布。':'关闭持续跟随；已经导入的本地副本保留。'}${toggle&&allowFollow?'<br>本次将有效期续至 180 天。':''}<br>本次会将当前本机课表发布到云端。${record.handedOffAt?'<br>这份分享已移交到其他设备；在这里发布会收回到本机，请确认新手机不再使用。':''}</p><p class="source-note">${payload.semester.courses.length} 门课程 · ${payload.semester.exams.length} 场考试；备注${payload.includeNotes?'包含':'不包含'}。云端当前版本 ${remote.revision}。</p><div class="sheet-actions">${button('share-manage','返回')}${button('owner-publish-confirm','确认发布','primary')}</div>`);
+    const emptying=!payload.semester.courses.length&&(remote.semester?.courses?.length||0)>0;
+    sheet(toggle?(allowFollow?'允许朋友持续跟随？':'暂停分享更新？'):'发布最新课表？',`<p class="helper-box">${esc(payload.semester.name)}<br>${allowFollow?'允许导入者选择跟随，之后本机修改会在 App 前台联网时自动发布。':'关闭持续跟随；已经导入的本地副本保留。'}${toggle&&allowFollow?'<br>本次将有效期续至 180 天。':''}<br>本次会将当前本机课表发布到云端。${record.handedOffAt?'<br>这份分享已移交到其他设备；在这里发布会收回到本机，请确认新手机不再使用。':''}</p>${emptying?`<p class="helper-box warning-box">本机这个学期没有课程，云端分享里有 ${remote.semester.courses.length} 门。发布后，跟随你的朋友会收到「课程被全部删除」的更新。如果只是换了手机，请返回点「从分享取回课表」。</p>`:''}<p class="source-note">${payload.semester.courses.length} 门课程 · ${payload.semester.exams.length} 场考试；备注${payload.includeNotes?'包含':'不包含'}。云端当前版本 ${remote.revision}。</p><div class="sheet-actions">${button('share-detail','返回','secondary',`data-code="${record.code}" data-server="${esc(record.server)}"`)}${button('owner-publish-confirm',emptying?'仍然发布空课表':'确认发布',emptying?'danger':'primary')}</div>`);
   }
   async function click(action,el){
     if(!['follow-list','follow-check','follow-toggle','follow-remove','follow-remove-confirm','follow-review','follow-merge','follow-replace-preview','follow-replace-confirm','owner-publish-now','owner-toggle-follow','owner-publish-confirm'].includes(action))return false;

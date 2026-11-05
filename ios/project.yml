@@ -11,8 +11,8 @@ packages:
 settings:
   base:
     # Kept equal to android/app/build.gradle by tests/version.test.mjs.
-    MARKETING_VERSION: 3.3.5
-    CURRENT_PROJECT_VERSION: 12
+    MARKETING_VERSION: 3.3.6
+    CURRENT_PROJECT_VERSION: 13
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: ""
 targets:
