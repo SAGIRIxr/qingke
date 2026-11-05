@@ -1,12 +1,12 @@
-# 清课 3.3.4
+# 清课 3.3.5
 
-一款无广告、无需应用账号、在本机保存数据的 Android 课程表。支持自定义正方教务网址、文字型 PDF 导入、年度循环作息、批量调休调课、独立考试、系统提醒，以及可选择开启的口令分享与课表跟随。3.3.4 新增「换机码」：换手机时把自己创建的分享转移到新手机（安卓、苹果通用，端到端加密、一次有效），导出备份可选是否包含分享凭证。保留 3.3.3 的 24 节导入、35／90 分钟「即将上课」、大节分块横线和按年节假日。
+一款无广告、无需应用账号、在本机保存数据的 Android 课程表。支持自定义正方教务网址、文字型 PDF 导入、年度循环作息、批量调休调课、独立考试、系统提醒，以及可选择开启的口令分享与课表跟随。3.3.5 起，用「换机码」把自己创建的分享转移到新手机（安卓、苹果通用，端到端加密、一次有效）后，新手机没有对应课表时可直接从分享取回并关联；导出备份可选是否包含分享凭证。保留 3.3.3 的 24 节导入、35／90 分钟「即将上课」、大节分块横线和按年节假日。
 
-官网与下载：[qk.sagiri.org](https://qk.sagiri.org/) · 源码：[SAGIRIxr/qingke](https://github.com/SAGIRIxr/qingke) · 安装包：[GitHub Releases](https://github.com/SAGIRIxr/qingke/releases) · 本版发布页：[v3.3.4](https://github.com/SAGIRIxr/qingke/releases/tag/v3.3.4)。本版 Android 版本号为 `3.3.4`，版本代码为 `11`。
+官网与下载：[qk.sagiri.org](https://qk.sagiri.org/) · 源码：[SAGIRIxr/qingke](https://github.com/SAGIRIxr/qingke) · 安装包：[GitHub Releases](https://github.com/SAGIRIxr/qingke/releases) · 本版发布页：[v3.3.5](https://github.com/SAGIRIxr/qingke/releases/tag/v3.3.5)。本版 Android 版本号为 `3.3.5`，版本代码为 `12`。
 
 ## 安装与首次使用
 
-在官网选择 GH-Proxy 下载或 GitHub 官方下载，也可从发布页的 Assets 下载 `qingke-3.3.4-release.apk`，安装后打开手机桌面的「清课」。GH-Proxy 是可选的第三方下载代理。正式包关闭 WebView 调试，最低支持 Android 8.0，建议使用已更新的 Android System WebView。
+在官网选择 GH-Proxy 下载或 GitHub 官方下载，也可从发布页的 Assets 下载 `qingke-3.3.5-release.apk`，安装后打开手机桌面的「清课」。GH-Proxy 是可选的第三方下载代理。正式包关闭 WebView 调试，最低支持 Android 8.0，建议使用已更新的 Android System WebView。
 
 1. 到「设置」→「学期与校历」→「学期管理」，点学期旁的「编辑」，核对学年、学期、实际开学日期和总周数。开学可以是任意星期；教学周仍为周一至周日，首周开学前不排基础课程。默认日期用于初始化，不代表学校校历。
 2. 到「设置」→「学期与校历」→「上课作息」，按学校通知填写各小节起止时间及每年生效月日。
