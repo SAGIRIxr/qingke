@@ -23,6 +23,12 @@ public final class ShareRequestPolicyTest {
         check(ShareRequestPolicy.method("update").equals("PUT"), "Authenticated update method is fixed");
         check(ShareRequestPolicy.endpoint("https://example.com", "update", code).equals("https://example.com/api/shares/" + code), "Update uses only fixed share-code path");
         rejects(() -> ShareRequestPolicy.endpoint("https://example.com", "update", "bad/code"), "Update cannot inject an arbitrary endpoint");
+        String transfer = "0123456789abcdef0123456789abcdef";
+        check(ShareRequestPolicy.endpoint("https://example.com", "transfer-create", "").equals("https://example.com/api/transfers"), "Fixed transfer create path");
+        check(ShareRequestPolicy.endpoint("https://example.com", "transfer-get", transfer).equals("https://example.com/api/transfers/" + transfer), "Transfer read uses only the hex id");
+        check(ShareRequestPolicy.method("transfer-create").equals("POST") && ShareRequestPolicy.method("transfer-get").equals("GET"), "Transfer methods are fixed");
+        rejects(() -> ShareRequestPolicy.endpoint("https://example.com", "transfer-get", "../shares/" + code), "Transfer id cannot inject a path");
+        rejects(() -> ShareRequestPolicy.endpoint("https://example.com", "transfer-get", transfer.toUpperCase()), "Transfer id must be lowercase hex");
         rejects(() -> ShareRequestPolicy.origin("http://example.com"), "Plain HTTP denied");
         rejects(() -> ShareRequestPolicy.origin("https://user:pass@example.com"), "URL credentials denied");
         rejects(() -> ShareRequestPolicy.origin("https://example.com/path"), "Custom path denied");

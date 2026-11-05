@@ -55,11 +55,18 @@ final class ShareClient {
         try {
             ShareRequestPolicy.requestBytes(payloadJson);
             payload = new JSONObject(payloadJson);
-            endpoint = ShareRequestPolicy.endpoint(baseUrl, action, payload.optString("code", ""));
+            boolean transfer = action != null && action.startsWith("transfer-");
+            endpoint = ShareRequestPolicy.endpoint(baseUrl, action, payload.optString(transfer ? "id" : "code", ""));
             method = ShareRequestPolicy.method(action);
             boolean update = "update".equals(action);
             authorization = ("delete".equals(action) || update) ? ShareRequestPolicy.bearer(payload.optString("deleteToken", "")) : null;
-            if ("create".equals(action) || update) {
+            if ("transfer-create".equals(action)) {
+                // Device transfer: an opaque id plus ciphertext sealed in the page; nothing else is forwarded.
+                String id = payload.optString("id", ""), data = payload.optString("data", "");
+                if (!id.matches("[0-9a-f]{32}") || data.length() > 128 * 1024 || !data.matches("[A-Za-z0-9+/]+={0,2}"))
+                    throw new IllegalArgumentException("换机数据格式不正确");
+                body = ShareRequestPolicy.requestBytes(new JSONObject().put("id", id).put("data", data).toString());
+            } else if ("create".equals(action) || update) {
                 if (!"qingke-semester".equals(payload.optString("format")) || payload.optInt("version") != 1
                         || payload.optJSONObject("semester") == null || !(payload.opt("includeNotes") instanceof Boolean)
                         || (payload.has("includeExams") && !(payload.opt("includeExams") instanceof Boolean))

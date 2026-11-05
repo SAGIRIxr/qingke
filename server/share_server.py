@@ -24,6 +24,10 @@ from share_schema import InvalidPayload, normalize_payload, validate_share_budge
 LOG = logging.getLogger('qingke-share')
 ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 MAX_BODY = 1024 * 1024
+# Device-transfer blobs: share credentials sealed on the phone with a key derived from the transfer
+# code. The server sees a one-way id and ciphertext only; a blob is read once and lives 24 hours.
+TRANSFER_SECONDS = 24 * 3600
+MAX_TRANSFER_DATA = 128 * 1024
 SITE_ROOT = Path(__file__).resolve().with_name('site')
 # Exact route-to-file mapping; request paths are never used as filesystem paths.
 SITE_FILES = {
@@ -54,7 +58,9 @@ class Config:
         'request': (120, 60), 'read': (60, 60), 'read_hour': (300, 3600),
         'create': (12, 3600), 'delete': (30, 60), 'update': (60, 3600),
         'global_request': (600, 60), 'global_create': (200, 3600), 'global_update': (600, 3600),
+        'transfer_create': (10, 3600), 'transfer_read': (20, 3600), 'global_transfer_create': (200, 3600),
     })
+    max_transfers: int = 2000
 
     @classmethod
     def from_env(cls):
@@ -123,6 +129,7 @@ class Store:
                     db.execute(f'ALTER TABLE shares ADD COLUMN {column} {definition}')
             db.execute('UPDATE shares SET updated_at = created_at WHERE updated_at = 0')
             db.execute('CREATE INDEX IF NOT EXISTS shares_expiry ON shares(expires_at)')
+            db.execute('CREATE TABLE IF NOT EXISTS transfers (id_hash BLOB PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, data TEXT NOT NULL)')
         try:
             os.chmod(path, 0o600)
         except OSError:
@@ -146,6 +153,7 @@ class Store:
     def cleanup(self, now=None):
         with self.connect() as db:
             db.execute('DELETE FROM shares WHERE expires_at <= ?', (int(time.time() if now is None else now),))
+            db.execute('DELETE FROM transfers WHERE expires_at <= ?', (int(time.time() if now is None else now),))
         with self.connect() as db:
             db.execute('PRAGMA incremental_vacuum(128)')
 
@@ -210,6 +218,30 @@ class Store:
             if changed != 1:
                 raise ApiError(409, 'conflict', '云端版本已变化，请先读取最新版本并核对')
         return {'revision': revision, 'allowFollow': allow_follow, 'expiresAt': expires_iso(expires), 'updatedAt': expires_iso(now)}
+
+    def create_transfer(self, transfer_id, data, now=None):
+        now = int(time.time() if now is None else now)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('DELETE FROM transfers WHERE expires_at <= ?', (now,))
+            if db.execute('SELECT COUNT(*) FROM transfers').fetchone()[0] >= self.config.max_transfers:
+                raise ApiError(503, 'storage_full', '换机服务繁忙，请稍后再试')
+            try:
+                db.execute('INSERT INTO transfers (id_hash, created_at, expires_at, data) VALUES (?, ?, ?, ?)', (digest(transfer_id), now, now + TRANSFER_SECONDS, data))
+            except sqlite3.IntegrityError:
+                raise ApiError(409, 'conflict', '换机码已存在，请重新生成') from None
+        return {'expiresAt': expires_iso(now + TRANSFER_SECONDS)}
+
+    def take_transfer(self, transfer_id, now=None):
+        """One-time read: the blob is deleted in the same transaction that returns it."""
+        now = int(time.time() if now is None else now)
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT data FROM transfers WHERE id_hash = ? AND expires_at > ?', (digest(transfer_id), now)).fetchone()
+            db.execute('DELETE FROM transfers WHERE id_hash = ?', (digest(transfer_id),))
+        if not row:
+            raise ApiError(404, 'not_found', '换机码不存在、已使用或已过期')
+        return {'data': row[0]}
 
     def delete(self, code, token, now=None):
         now = int(time.time() if now is None else now)
@@ -278,7 +310,7 @@ class ShareApp:
             if env.get('HTTP_TRANSFER_ENCODING') or env.get('HTTP_CONTENT_ENCODING', 'identity') != 'identity':
                 raise ApiError(400, 'invalid_request', '不支持分块或压缩请求体')
             if method == 'OPTIONS':
-                if path != '/api/shares' and not re.fullmatch(r'/api/shares/[A-Za-z0-9-]{20,24}', path):
+                if path not in ('/api/shares', '/api/transfers') and not re.fullmatch(r'/api/(shares/[A-Za-z0-9-]{20,24}|transfers/[0-9a-f]{32})', path):
                     raise ApiError(404, 'not_found', '接口不存在')
                 requested = env.get('HTTP_ACCESS_CONTROL_REQUEST_METHOD', '')
                 headers = {p.strip().lower() for p in env.get('HTTP_ACCESS_CONTROL_REQUEST_HEADERS', '').split(',') if p.strip()}
@@ -295,6 +327,21 @@ class ShareApp:
                 # Bad bodies spend request limits, not the hourly creation quota.
                 self.limiter.check(ip, ['create', 'global_create'])
                 return self.respond(start_response, 201, self.store.create(payload, days, allow_follow=body.get('allowFollow', False)), cors, request_id)
+            if path == '/api/transfers':
+                if method != 'POST':
+                    raise ApiError(405, 'method_not_allowed', '此接口只接受 POST')
+                body = self.read_json(env)
+                transfer_id, data = (body.get('id'), body.get('data')) if isinstance(body, dict) else (None, None)
+                if not isinstance(body, dict) or set(body) != {'id', 'data'} or not isinstance(transfer_id, str) or not re.fullmatch(r'[0-9a-f]{32}', transfer_id)                         or not isinstance(data, str) or not re.fullmatch(r'[A-Za-z0-9+/]+={0,2}', data) or len(data) > MAX_TRANSFER_DATA:
+                    raise ApiError(400, 'invalid_payload', '换机数据格式不正确')
+                self.limiter.check(ip, ['transfer_create', 'global_transfer_create'])
+                return self.respond(start_response, 201, self.store.create_transfer(transfer_id, data), cors, request_id)
+            match = re.fullmatch(r'/api/transfers/([0-9a-f]{32})', path)
+            if match:
+                if method != 'GET':
+                    raise ApiError(405, 'method_not_allowed', '此接口只接受 GET')
+                self.limiter.check(ip, ['transfer_read'])
+                return self.respond(start_response, 200, self.store.take_transfer(match[1]), cors, request_id)
             match = re.fullmatch(r'/api/shares/([A-Za-z0-9-]{20,24})', path)
             if not match:
                 raise ApiError(404, 'not_found', '接口或口令不存在')

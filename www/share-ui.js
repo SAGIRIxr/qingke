@@ -2,6 +2,7 @@ import {createFollowManager} from './share-follow.js';
 import {shareMessage,parseShareInput,shareCode,shareServer,prettyCode} from './share-links.js';
 import {uid,validateState,createState} from './engine.js';
 import {esc,clone,icon,button,field,input,select,submit,sheet,closeSheet,toast} from './ui.js';
+import {newTransferCode,normalizeTransferCode,sealTransfer,openTransfer,transferId} from './transfer-seal.js';
 
 const RECORD_KEY='qingke.shares.v1';
 const CODE=/^[0-9A-HJKMNP-TV-Z]{20}$/;
@@ -24,6 +25,7 @@ function writeRecords(list){localStorage.setItem(RECORD_KEY,JSON.stringify(list)
 const FOLLOW_KEY='qingke.follows.v1';
 const storedList=key=>{try{const v=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(v)?v:[];}catch{return [];}};
 const httpsServer=value=>{try{return endpoint(value)===value;}catch{return false;}};
+const validShare=r=>r&&CODE.test(r.code)&&typeof r.deleteToken==='string'&&r.deleteToken.length<=500&&httpsServer(r.server)&&new Date(r.expiresAt).getTime()>Date.now();
 /** Share credentials and follow records travel inside a full backup, outside the timetable state, so a
  * new phone can keep publishing to, revoking and following the same shares. */
 export function shareBackup(){
@@ -40,7 +42,7 @@ export function shareBackupSummary(data){
 export function restoreShareBackup(data,semesterIds){
   if(!shareBackupSummary(data))return {shares:0,follows:0};
   const ids=new Set(semesterIds),key=r=>`${r.server}|${r.code}`;
-  const shares=(Array.isArray(data.shares)?data.shares:[]).filter(r=>r&&CODE.test(r.code)&&typeof r.deleteToken==='string'&&r.deleteToken.length<=500&&httpsServer(r.server)&&new Date(r.expiresAt).getTime()>Date.now()).slice(0,100);
+  const shares=(Array.isArray(data.shares)?data.shares:[]).filter(validShare).slice(0,100);
   const follows=(Array.isArray(data.follows)?data.follows:[]).filter(r=>r&&CODE.test(r.code)&&httpsServer(r.server)&&ids.has(r.localSemesterId)).slice(0,30);
   let current=[];try{current=records();}catch{}
   const merged=new Map(current.map(r=>[key(r),r]));
@@ -81,10 +83,11 @@ async function request(server,action,payload){
   if(window.Android?.shareRequest){
     return new Promise((resolve,reject)=>{const requestId=uid(),timer=setTimeout(()=>{pending.delete(requestId);reject(Error('服务响应超时，请检查网络；创建分享不会自动重试'));},45000);pending.set(requestId,{resolve,reject,timer});try{Android.shareRequest(requestId,action,server,JSON.stringify(payload));}catch(e){clearTimeout(timer);pending.delete(requestId);reject(e);}});
   }
-  const method={create:'POST',get:'GET',delete:'DELETE',update:'PUT'}[action];
-  const path=action==='create'?'/api/shares':`/api/shares/${normalizeCode(payload.code)}`;
-  const headers={Accept:'application/json'};if(action==='create'||action==='update')headers['Content-Type']='application/json';if(action==='delete'||action==='update')headers.Authorization=`Bearer ${payload.deleteToken}`;
-  const response=await fetch(server+path,{method,headers,body:action==='create'||action==='update'?JSON.stringify(Object.fromEntries(Object.entries(payload).filter(([key])=>!['code','deleteToken'].includes(key)))):undefined,credentials:'omit',redirect:'error',signal:AbortSignal.timeout(30000)});
+  const method={create:'POST',get:'GET',delete:'DELETE',update:'PUT','transfer-create':'POST','transfer-get':'GET'}[action];
+  if(action.startsWith('transfer-')&&!/^[0-9a-f]{32}$/.test(payload.id))throw Error('换机码无效');
+  const path=action==='create'?'/api/shares':action==='transfer-create'?'/api/transfers':action==='transfer-get'?`/api/transfers/${payload.id}`:`/api/shares/${normalizeCode(payload.code)}`;
+  const headers={Accept:'application/json'},sends=['create','update','transfer-create'].includes(action);if(sends)headers['Content-Type']='application/json';if(action==='delete'||action==='update')headers.Authorization=`Bearer ${payload.deleteToken}`;
+  const response=await fetch(server+path,{method,headers,body:sends?JSON.stringify(Object.fromEntries(Object.entries(payload).filter(([key])=>!['code','deleteToken'].includes(key)))):undefined,credentials:'omit',redirect:'error',signal:AbortSignal.timeout(30000)});
   const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>2*1024*1024)throw Error('服务响应过大，已停止读取');
   let data;try{data=bytes.length?JSON.parse(new TextDecoder().decode(bytes)):{};}catch{throw Error('服务返回了无法识别的内容');}
   if(!response.ok)throw Object.assign(Error(data.error?.message||`请求失败（${response.status}）`),{status:response.status});return data;
@@ -98,7 +101,7 @@ export function createShareUI(ctx){
   const server=()=>state().preferences.shareServerUrl||'https://qk.sagiri.org';
   const follow=createFollowManager(ctx,{request,sharePayload,records,writeRecords,showOwners:manage});
   function home(){
-    sheet('口令分享课表',`<p class="sheet-subtitle">分享一个学期，对方输入口令后预览并导入。分享会上传你确认的课表内容。</p><form id="share-server-form">${field('分享服务地址',input('server',server(),'url','required maxlength="500" placeholder="https://课表分享域名"'),'填写部署好的 HTTPS 域名。')}<button type="submit" class="secondary full-width">保存服务地址</button><div class="error-message" id="form-error" role="alert"></div></form><div class="sheet-actions">${button('share-create',`${icon('upload',17)} 分享我的课表`,'primary')}${button('share-receive',`${icon('download',17)} 输入口令导入`)}</div>${button('follow-list','我跟随的课表与同步状态','secondary full-width','style="margin-top:16px"')}${button('share-manage','管理我创建的分享','text-button full-width','style="margin-top:16px"')}${button('share-entry-settings','分享链接与剪贴板识别','text-button full-width')}<p class="source-note" style="margin-top:14px">持有口令的人可读取这份课表，请只发给需要的人。可设置到期时间或主动撤销。只有双方选择持续更新与跟随时，之后的修改才会同步。</p>`);
+    sheet('口令分享课表',`<p class="sheet-subtitle">分享一个学期，对方输入口令后预览并导入。分享会上传你确认的课表内容。</p><form id="share-server-form">${field('分享服务地址',input('server',server(),'url','required maxlength="500" placeholder="https://课表分享域名"'),'填写部署好的 HTTPS 域名。')}<button type="submit" class="secondary full-width">保存服务地址</button><div class="error-message" id="form-error" role="alert"></div></form><div class="sheet-actions">${button('share-create',`${icon('upload',17)} 分享我的课表`,'primary')}${button('share-receive',`${icon('download',17)} 输入口令导入`)}</div>${button('follow-list','我跟随的课表与同步状态','secondary full-width','style="margin-top:16px"')}${button('share-manage','管理我创建的分享','text-button full-width','style="margin-top:16px"')}${button('transfer-home','换手机：转移我创建的分享','text-button full-width')}${button('share-entry-settings','分享链接与剪贴板识别','text-button full-width')}<p class="source-note" style="margin-top:14px">持有口令的人可读取这份课表，请只发给需要的人。可设置到期时间或主动撤销。只有双方选择持续更新与跟随时，之后的修改才会同步。</p>`);
   }
   function createForm(){
     endpoint(server());
@@ -120,18 +123,20 @@ export function createShareUI(ctx){
     const s=receiveDraft.semester;
     sheet('预览分享课表',`<form id="share-import-form">${field('新学期名称',input('name',s.name,'text','required maxlength="80"'))}<div class="share-summary"><p>${s.startDate} 开始 · ${s.totalWeeks} 周</p><p>${s.courses.length} 门课程 · ${s.exams.length} 场考试 · ${s.profiles.length} 套作息</p></div><div class="share-course-preview">${s.courses.map(c=>`<p><strong>${esc(c.name)}</strong><small>${c.sessions.map(t=>esc(t.location||'地点待定')).join(' / ')}</small></p>`).join('')}</div><p class="helper-box">导入后保存为独立学期。请核对学校校历和作息，原有学期不会被覆盖。</p>${receiveDraft.allowFollow?'<label class="check-row"><input type="checkbox" name="follow" checked><span><strong>跟随分享者的后续更新</strong><small>导入后开启，可取消勾选。打开 App 或回到前台时检查，保留我自己的修改，有冲突先核对。</small></span></label>':'<p class="source-note">分享者未开启持续更新，将导入当前副本。</p>'}${submit('导入为新学期')}</form>`);
   }
+  const linkedSemester=r=>!!r.localSemesterId&&state().semesters.some(s=>s.id===r.localSemesterId);
   function manage(){
     const list=records().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-    sheet('我创建的分享',`<p class="sheet-subtitle">持续分享会在前台联网时发布修改；朋友需自行选择跟随。撤销口令不会远程删除已导入的本地副本。</p>${list.map(r=>`<div class="change-row" style="display:block"><strong>${esc(r.name)}</strong><small>${displayCode(r.code)} · 版本 ${r.revision||1}<br>${new Date(r.expiresAt).getTime()<=Date.now()?'已到期':`有效至 ${esc(new Date(r.expiresAt).toLocaleDateString('zh-CN'))}`}<br>${esc(new URL(r.server).hostname)}</small><p class="follow-status">${r.allowFollow?'允许持续跟随':'单次课表副本'}${r.error?`<br>${esc(r.error)}`:''}</p><div class="follow-actions">${button('share-show','查看 / 分享口令','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${r.localSemesterId?`${button('owner-publish-now','发布最新修改','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${button('owner-toggle-follow',r.allowFollow?'关闭持续跟随':'开启持续跟随','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}`:''}${button('share-revoke','撤销分享','text-button',`data-code="${r.code}" data-server="${esc(r.server)}"`)}</div></div>`).join('')||'<p class="helper-box">还没有在这台设备上创建过分享。</p>'}${button('share-home','返回','secondary full-width','style="margin-top:18px"')}`);
+    sheet('我创建的分享',`<p class="sheet-subtitle">持续分享会在前台联网时发布修改；朋友需自行选择跟随。撤销口令不会远程删除已导入的本地副本。</p>${list.map(r=>`<div class="change-row" style="display:block"><strong>${esc(r.name)}</strong><small>${displayCode(r.code)} · 版本 ${r.revision||1}<br>${new Date(r.expiresAt).getTime()<=Date.now()?'已到期':`有效至 ${esc(new Date(r.expiresAt).toLocaleDateString('zh-CN'))}`}<br>${esc(new URL(r.server).hostname)}</small><p class="follow-status">${r.allowFollow?'允许持续跟随':'单次课表副本'}${r.handedOffAt?'<br>已移交到其他设备：本机不再自动发布':r.transferNote?`<br>${esc(r.transferNote)}`:''}${r.error?`<br>${esc(r.error)}`:''}</p><div class="follow-actions">${button('share-show','查看 / 分享口令','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${linkedSemester(r)?`${button('owner-publish-now','发布最新修改','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}${button('owner-toggle-follow',r.allowFollow?'关闭持续跟随':'开启持续跟随','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`)}`:''}${r.handedOffAt?button('transfer-reclaim','收回到本机','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`):''}${!linkedSemester(r)?button('transfer-link','关联当前学期','secondary',`data-code="${r.code}" data-server="${esc(r.server)}"`):''}${button('share-revoke','撤销分享','text-button',`data-code="${r.code}" data-server="${esc(r.server)}"`)}</div></div>`).join('')||'<p class="helper-box">还没有在这台设备上创建过分享。</p>'}${button('share-home','返回','secondary full-width','style="margin-top:18px"')}`);
   }
   async function click(action,el){
     if(await follow.click(action,el))return true;
-    if(!['share-home','share-create','share-receive','share-manage','share-publish','share-copy','share-show','share-system','share-revoke','share-revoke-confirm'].includes(action))return false;
+    if(!['share-home','share-create','share-receive','share-manage','share-publish','share-copy','share-show','share-system','share-revoke','share-revoke-confirm','transfer-home','transfer-out','transfer-make','transfer-in','transfer-copy','transfer-reclaim','transfer-link'].includes(action))return false;
     if(busy){toast('正在处理分享请求，请稍候');return true;}
     if(action==='share-home')home();
     if(action==='share-create')createForm();
     if(action==='share-receive')receiveForm();
     if(action==='share-manage')manage();
+    if(action.startsWith('transfer-')){await transferClick(action,el);return true;}
     if(['share-copy','share-show','share-system'].includes(action)){
       const record=records().find(r=>r.code===el.dataset.code&&r.server===el.dataset.server);if(!record)throw Error('找不到这份分享，请重新打开分享管理');
       if(action==='share-show'){showCode(record);return true;}
@@ -167,7 +172,7 @@ export function createShareUI(ctx){
     return true;
   }
   async function submitForm(form,values){
-    if(!['share-server-form','share-create-form','share-receive-form','share-import-form'].includes(form.id))return false;
+    if(!['share-server-form','share-create-form','share-receive-form','share-import-form','transfer-in-form'].includes(form.id))return false;
     if(busy)throw Error('正在处理分享请求，请稍候');
     if(form.id==='share-server-form'){const url=endpoint(values.server.trim());if(ctx.save({...state(),preferences:{...state().preferences,shareServerUrl:url}})){toast('服务地址已保存');home();}return true;}
     if(form.id==='share-create-form'){
@@ -179,11 +184,74 @@ export function createShareUI(ctx){
       const code=parsed.code,submitButton=form.querySelector('[type="submit"]'),view=currentView();busy=true;submitButton.disabled=true;
       try{const payload=await request(source,'get',{code});if(currentView()===view){receiveDraft=follow.prepare(payload,source,code);receivePreview();}}finally{busy=false;submitButton.disabled=false;}return true;
     }
+    if(form.id==='transfer-in-form'){const submitButton=form.querySelector('[type="submit"]');busy=true;submitButton.disabled=true;try{await redeemTransfer(values.code);}finally{busy=false;submitButton.disabled=false;}return true;}
     if(form.id==='share-import-form'){
       if(!receiveDraft)throw Error('请重新读取分享课表');const s={...receiveDraft.semester,name:values.name};
       if(ctx.save({...state(),semesters:[...state().semesters,s],activeSemesterId:s.id},'导入分享课表前')){let message='课表已导入为新学期';if(receiveDraft.allowFollow&&values.follow==='on')try{follow.subscribe(receiveDraft);message+='，跟随已开启';}catch(e){message+='；跟随未保存：'+e.message;}receiveDraft=null;ctx.refresh();toast(message);}return true;
     }
     return false;
+  }
+  // ---------- Moving owned shares to another phone ----------
+  // Only management credentials move; timetables stay on the phones. The sending phone hands its
+  // shares off (stops auto-publishing) so two phones never publish the same share against each other.
+  const shareKey=r=>`${r.server}|${r.code}`;
+  const transferable=()=>records().filter(validShare);
+  function transferHome(){
+    sheet('换手机',`<p class="sheet-subtitle">把你创建的分享移到另一台手机（安卓和苹果通用），之后由新手机继续更新、续期和撤销。</p>${button('transfer-out','在旧手机：生成换机码','primary full-width')}${button('transfer-in','在新手机：输入换机码','secondary full-width','style="margin-top:10px"')}<p class="helper-box" style="margin-top:16px">只转移分享的管理凭证，不上传课表本身：课表请在新手机重新导入或恢复备份。跟随朋友的课表请在新手机重新输入朋友的口令。</p><p class="source-note">换机码在本机加密，服务器只保存无法解读的密文，24 小时内有效，读取一次后即删除。</p>${button('share-home','返回','text-button full-width')}`);
+  }
+  function transferOut(){
+    const list=transferable(),active=list.filter(r=>!r.handedOffAt);
+    sheet('生成换机码',`${list.length?`<div class="share-summary"><strong>${list.length} 个分享</strong>${list.map(r=>`<p>${esc(r.name)} · ${displayCode(r.code)}</p>`).join('')}</div><p class="helper-box">生成后，本机${active.length?'会暂停这些分享的自动发布，':''}仍可查看口令；新手机接手后由它发布修改。万一没用上，可在「管理我创建的分享」中收回。</p>${button('transfer-make','生成换机码','primary full-width')}`:'<p class="helper-box">这台手机上没有有效的分享可以转移。</p>'}${button('transfer-home','返回','text-button full-width')}`);
+  }
+  async function makeTransfer(el){
+    const list=transferable();if(!list.length)throw Error('没有可转移的分享');
+    const code=newTransferCode(),sealed=sealTransfer(code,{format:'qingke-transfer',version:1,createdAt:new Date().toISOString(),shares:list});
+    const view=currentView();busy=true;el.disabled=true;
+    try{
+      const result=await request(server(),'transfer-create',sealed);
+      const moved=new Set(list.map(shareKey)),at=new Date().toISOString();
+      writeRecords(records().map(r=>moved.has(shareKey(r))?{...r,handedOffAt:r.handedOffAt||at,autoPublish:false}:r));
+      if(currentView()===view)sheet('换机码',`<label class="field"><span>换机码</span><input readonly class="share-code" value="${displayCode(code)}" aria-label="换机码"></label>${button('transfer-copy','复制换机码','primary full-width',`data-code="${code}"`)}<p class="helper-box">在新手机打开清课：设置 → 分享与跟随 → 换手机 → 输入换机码。<br>有效至 ${esc(new Date(result.expiresAt).toLocaleString('zh-CN'))}，只能使用一次。</p><p class="source-note">换机码就是解密钥匙，请勿发给别人。新手机需使用同一个分享服务。</p>${button('share-manage','完成','text-button full-width')}`);
+    }finally{busy=false;el.disabled=false;}
+  }
+  async function redeemTransfer(value){
+    const code=normalizeTransferCode(value),view=currentView();
+    const {data}=await request(server(),'transfer-get',{id:transferId(code)});
+    const payload=openTransfer(code,data);
+    if(payload?.format!=='qingke-transfer'||payload.version!==1||!Array.isArray(payload.shares))throw Error('换机数据格式不受支持');
+    const semesters=state().semesters,incoming=payload.shares.filter(validShare).slice(0,100);let linked=0,named=0;
+    const received=incoming.map(r=>{
+      // Same id: the timetable came over by backup. A unique name match is linked but stays paused
+      // until the owner checks it and publishes once, so a wrong match never reaches followers.
+      let local=semesters.find(s=>s.id===r.localSemesterId),how='id';
+      if(!local){const same=semesters.filter(s=>s.name===r.name);if(same.length===1){local=same[0];how='name';}}
+      if(local){if(how==='id')linked++;else named++;}
+      const {handedOffAt,transferNote,error,...rest}=r;
+      return {...rest,localSemesterId:local?.id||'',autoPublish:how==='id'&&!!local&&r.allowFollow===true,
+        transferNote:!local?'未找到对应学期：可撤销，或打开该学期后点「关联当前学期」':how==='name'?'已按学期名称关联：核对后点「发布最新修改」恢复自动更新':''};
+    });
+    const merged=new Map(records().map(r=>[shareKey(r),r]));received.forEach(r=>merged.set(shareKey(r),r));writeRecords([...merged.values()]);
+    if(currentView()===view)manage();
+    const unlinked=received.length-linked-named;
+    toast(`已接手 ${received.length} 个分享${named?`，${named} 个按名称关联待确认`:''}${unlinked?`，${unlinked} 个未关联学期`:''}`);
+  }
+  async function transferClick(action,el){
+    if(action==='transfer-home'){transferHome();return true;}
+    if(action==='transfer-out'){transferOut();return true;}
+    if(action==='transfer-make'){await makeTransfer(el);return true;}
+    if(action==='transfer-in'){sheet('输入换机码',`<form id="transfer-in-form">${field('换机码',input('code','','text','required maxlength="40" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX-XXXXX-XXXXX"'),'在旧手机「生成换机码」后得到，24 小时内有效。')}<p class="helper-box">接手后，新手机负责发布这些分享的修改，旧手机已自动暂停发布。</p>${submit('接手分享')}</form>`);return true;}
+    if(action==='transfer-copy'){const text=displayCode(el.dataset.code);if(window.Android?.copyText&&Android.copyText(text)){toast('换机码已复制');return true;}try{await navigator.clipboard.writeText(text);toast('换机码已复制');}catch{toast('请长按换机码复制');}return true;}
+    if(!['transfer-reclaim','transfer-link'].includes(action))return false;
+    const record=records().find(r=>r.code===el.dataset.code&&r.server===el.dataset.server);
+    if(!record)throw Error('找不到这份分享，请重新打开分享管理');
+    const patch=fields=>writeRecords(records().map(r=>{if(shareKey(r)!==shareKey(record))return r;const {handedOffAt,...rest}=r;return {...rest,...fields};}));
+    if(action==='transfer-reclaim'){
+      patch({autoPublish:false,transferNote:'已收回：核对后点「发布最新修改」恢复自动更新'});
+      manage();toast('已收回。若另一台手机也接手了，请只在一台上发布');return true;
+    }
+    const active=state().semesters.find(s=>s.id===state().activeSemesterId);
+    patch({localSemesterId:active.id,autoPublish:false,transferNote:`已关联「${active.name}」：核对后点「发布最新修改」恢复自动更新`});
+    manage();return true;
   }
   function change(target){if(target.closest('#share-create-form')&&target.name==='allowFollow'){const el=document.querySelector('#share-create-form [name="expiresInDays"]');const values=target.checked?[[7,'7 天'],[30,'30 天'],[180,'180 天'],[365,'365 天']]:[[1,'1 天'],[7,'7 天'],[30,'30 天']];el.innerHTML=values.map(([v,t])=>`<option value="${v}">${t}</option>`).join('');el.value=target.checked?'180':'7';return true;}return false;}
   return {click,submit:submitForm,change,home,isOwnShare:entry=>records().some(r=>r.code===entry.code&&r.server===entry.server),openShare:entry=>receiveForm({code:shareCode(entry.code),server:shareServer(entry.server),source:entry.source}),onStateSaved:follow.schedule,onForeground:follow.foreground};

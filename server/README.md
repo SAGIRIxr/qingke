@@ -70,6 +70,8 @@ https://qk.sagiri.org/s#code=0123456789ABCDEFGHJK&server=https%3A%2F%2Fqk.sagiri
 | 503 | storage_full / temporarily_unavailable | 存储容量满或暂不可用 |
 | 500 | internal_error | 其他服务错误 |
 
+换机：`POST /api/transfers` 提交 `{id,data}`，`id` 为 32 位小写十六进制、`data` 为不超过 128 KB 的 base64；成功 HTTP 201 返回 `{expiresAt}`，同 id 重复为 409。`GET /api/transfers/{id}` 返回 `{data}` 并在同一事务里删除，再读为 404；24 小时后过期清理。`data` 是 App 用换机码派生的密钥加密的分享管理凭证（HMAC-SHA256 计数器模式 + 加密后 MAC），`id` 由换机码单向派生；服务器只按 SHA-256(id) 存放，看不到换机码、令牌或课表。限流：每 IP 每小时创建 10 次、读取 20 次。
+
 ## 单学期白名单
 
 采用清课 v2 的单个 semester，不接受完整备份或 preferences。服务重新构造数据；未知字段拒绝。顶层字段：`id,name,startDate,totalWeeks,showWeekend,profiles,courses,dayRules,exceptions,holidayLabels,exams`。

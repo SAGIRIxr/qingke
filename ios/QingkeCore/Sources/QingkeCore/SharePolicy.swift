@@ -34,6 +34,11 @@ public enum ShareRequestPolicy {
     public static func endpoint(baseURL: String, action: String, code: String) throws -> String {
         let base = try origin(baseURL)
         if action == "create" { return base + "/api/shares" }
+        if action == "transfer-create" { return base + "/api/transfers" }
+        if action == "transfer-get" {
+            guard code.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else { throw SharePolicyError("换机码格式不正确") }
+            return base + "/api/transfers/" + code
+        }
         guard ["get", "delete", "update"].contains(action) else { throw SharePolicyError("不支持的分享操作") }
         guard code.range(of: "^[A-Za-z0-9_-]{20}$", options: .regularExpression) != nil else {
             throw SharePolicyError("分享码格式不正确，应为 20 位字符")
@@ -43,8 +48,8 @@ public enum ShareRequestPolicy {
 
     public static func method(_ action: String) throws -> String {
         switch action {
-        case "create": return "POST"
-        case "get": return "GET"
+        case "create", "transfer-create": return "POST"
+        case "get", "transfer-get": return "GET"
         case "delete": return "DELETE"
         case "update": return "PUT"
         default: throw SharePolicyError("不支持的分享操作")
@@ -76,8 +81,19 @@ public enum ShareRequestPolicy {
         guard let payload = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] else {
             throw SharePolicyError("分享内容格式不正确")
         }
-        let url = try endpoint(baseURL: baseURL, action: action, code: payload["code"] as? String ?? "")
         let httpMethod = try Self.method(action)
+        // Device transfer: an opaque id plus ciphertext sealed in the page; nothing else is forwarded.
+        if action.hasPrefix("transfer-") {
+            let id = payload["id"] as? String ?? ""
+            let url = try endpoint(baseURL: baseURL, action: action, code: id)
+            guard action == "transfer-create" else { return Request(url: url, method: httpMethod, authorization: nil, body: nil) }
+            guard id.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil, let data = payload["data"] as? String,
+                  data.utf8.count <= 128 * 1024, data.range(of: "^[A-Za-z0-9+/]+={0,2}$", options: .regularExpression) != nil else {
+                throw SharePolicyError("换机数据格式不正确")
+            }
+            return Request(url: url, method: httpMethod, authorization: nil, body: try JSONSerialization.data(withJSONObject: ["id": id, "data": data]))
+        }
+        let url = try endpoint(baseURL: baseURL, action: action, code: payload["code"] as? String ?? "")
         let update = action == "update"
         var authorization: String?
         if action == "delete" || update { authorization = try bearer(payload["deleteToken"] as? String ?? "") }

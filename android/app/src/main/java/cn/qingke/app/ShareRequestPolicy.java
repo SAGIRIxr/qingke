@@ -32,14 +32,19 @@ final class ShareRequestPolicy {
     static String endpoint(String baseUrl, String action, String code) {
         String base = origin(baseUrl);
         if ("create".equals(action)) return base + "/api/shares";
+        if ("transfer-create".equals(action)) return base + "/api/transfers";
+        if ("transfer-get".equals(action)) {
+            if (code == null || !code.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("换机码格式不正确");
+            return base + "/api/transfers/" + code;
+        }
         if (!("get".equals(action) || "delete".equals(action) || "update".equals(action))) throw new IllegalArgumentException("不支持的分享操作");
         if (code == null || !code.matches("[A-Za-z0-9_-]{20}")) throw new IllegalArgumentException("分享码格式不正确，应为 20 位字符");
         return base + "/api/shares/" + code;
     }
 
     static String method(String action) {
-        if ("create".equals(action)) return "POST";
-        if ("get".equals(action)) return "GET";
+        if ("create".equals(action) || "transfer-create".equals(action)) return "POST";
+        if ("get".equals(action) || "transfer-get".equals(action)) return "GET";
         if ("delete".equals(action)) return "DELETE";
         if ("update".equals(action)) return "PUT";
         throw new IllegalArgumentException("不支持的分享操作");

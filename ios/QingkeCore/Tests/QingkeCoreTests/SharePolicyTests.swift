@@ -114,6 +114,24 @@ final class SharePolicyTests: XCTestCase {
         XCTAssertEqual(own.recentState, "")
     }
 
+    func testTransferPolicy() throws {
+        let id = String(repeating: "a", count: 32)
+        let create = try ShareRequestPolicy.request(action: "transfer-create", baseURL: root, payloadJSON: #"{"id":"\#(id)","data":"c2VhbGVk","deleteToken":"leak-me-please-0000"}"#)
+        XCTAssertEqual(create.url, root + "/api/transfers")
+        XCTAssertEqual(create.method, "POST")
+        XCTAssertNil(create.authorization)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(create.body)) as? [String: String])
+        XCTAssertEqual(body, ["id": id, "data": "c2VhbGVk"])
+        let get = try ShareRequestPolicy.request(action: "transfer-get", baseURL: root, payloadJSON: #"{"id":"\#(id)"}"#)
+        XCTAssertEqual(get.url, root + "/api/transfers/" + id)
+        XCTAssertEqual(get.method, "GET")
+        XCTAssertNil(get.body)
+        for payload in [#"{"id":"../shares","data":"eA=="}"#, #"{"id":"\#(id)","data":"not base64!"}"#, #"{"id":"\#(id.uppercased())","data":"eA=="}"#] {
+            XCTAssertThrowsError(try ShareRequestPolicy.request(action: "transfer-create", baseURL: root, payloadJSON: payload), payload)
+        }
+        XCTAssertThrowsError(try ShareRequestPolicy.request(action: "transfer-get", baseURL: root, payloadJSON: #"{"id":"x"}"#))
+    }
+
     func testRequestPolicy() throws {
         let shareCode = "0123456789abcdefghij"
         XCTAssertEqual(try ShareRequestPolicy.origin("https://EXAMPLE.com/"), "https://example.com")

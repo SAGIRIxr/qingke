@@ -62,6 +62,31 @@ class ShareTests(unittest.TestCase):
         self.assertEqual(status, 201, data)
         return data
 
+    def test_transfer_is_read_once_and_stores_only_hashed_id_and_ciphertext(self):
+        transfer_id, blob = 'a' * 32, 'c2VhbGVk' * 4
+        status, data, _ = self.request('POST', '/api/transfers', {'id': transfer_id, 'data': blob})
+        self.assertEqual(status, 201, data)
+        self.assertIn('expiresAt', data)
+        self.assertEqual(self.request('POST', '/api/transfers', {'id': transfer_id, 'data': blob})[0], 409)
+        db = sqlite3.connect(self.config.db_path)
+        try:
+            stored = db.execute('SELECT id_hash, data FROM transfers').fetchall()
+        finally:
+            db.close()
+        self.assertEqual(stored, [(digest(transfer_id), blob)])
+        status, data, _ = self.request('GET', '/api/transfers/' + transfer_id)
+        self.assertEqual((status, data), (200, {'data': blob}))
+        self.assertEqual(self.request('GET', '/api/transfers/' + transfer_id)[0], 404)
+
+    def test_transfer_rejects_bad_bodies_and_expires(self):
+        for body in [{'id': 'A' * 32, 'data': 'eA=='}, {'id': 'a' * 31, 'data': 'eA=='}, {'id': 'a' * 32, 'data': 'not base64!'},
+                     {'id': 'a' * 32, 'data': 'eA==', 'extra': 1}, {'id': 'a' * 32, 'data': 'A' * (128 * 1024 + 4)}, [1, 2]]:
+            self.assertEqual(self.request('POST', '/api/transfers', body)[0], 400, body)
+        self.assertEqual(self.request('GET', '/api/transfers/' + 'g' * 32)[0], 404)
+        self.app.store.create_transfer('b' * 32, 'eA==', now=1000)
+        self.app.store.cleanup(now=1000 + 24 * 3600)
+        self.assertEqual(self.request('GET', '/api/transfers/' + 'b' * 32)[0], 404)
+
     def test_create_read_delete_and_secret_hash_storage(self):
         created = self.create()
         self.assertEqual(len(created['code']), 20)
